@@ -9,9 +9,11 @@
   <script src="library.js" defer></script>
 </head>
 <body>
+  <header class="workspace-header"><span class="workspace-brand"><span class="brand-mark">↗</span>网页评注 <span class="workspace-name">个人云空间</span></span><button class="btn" data-action="access" id="access-button">连接云空间</button></header>
   <main id="app" class="library-shell"><div class="empty-state">正在读取保存的网页…</div></main>
   <dialog id="detail-dialog" class="drawer" aria-label="网页评注详情"></dialog>
-  <dialog id="delete-dialog" aria-label="删除评注"><h2>删除这条评注？</h2><p>评论和对应画面会从本机保存库删除。已经导出的材料不受影响。</p><div class="dialog-actions"><button class="button btn" id="cancel-delete">保留</button><button class="button btn danger" id="confirm-delete">删除评注</button></div></dialog>
+  <dialog id="access-dialog" aria-label="AI访问设置"></dialog>
+  <dialog id="delete-dialog" aria-label="删除评注"><h2>删除这条评注？</h2><p>评论会从本机移除；已同步记录会排队从云资料库移除。</p><div class="dialog-actions"><button class="button btn" id="cancel-delete">保留</button><button class="button btn danger" id="confirm-delete">删除评注</button></div></dialog>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

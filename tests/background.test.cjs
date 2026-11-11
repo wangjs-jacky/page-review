@@ -76,3 +76,8 @@ test('截图过程中切换前台标签会丢弃本次图像', async () => {
   const t = setup(); let read = 0; t.chrome.tabs.query = async () => [{ id: ++read === 1 ? 1 : 2 }];
   const result = await t.call('CAPTURE', { url: t.page.url, viewport: { width: 800, height: 600 } }); assert.equal(result.ok, false); assert.match(result.error, /截图期间页面已切换/); assert.equal(t.calls.captured, 1);
 });
+
+test('限制存储为可信上下文后，开关通过明确消息通知已有网页刷新', async () => {
+  const t = setup(), notices = []; t.chrome.tabs.sendMessage = async (id, message) => notices.push({ id, message });
+  await t.click(); await t.click(); assert.equal(notices.length, 2); assert.equal(notices[0].id, 1); assert.equal(notices[0].message.type, 'PAGE_REVIEW_SETTINGS_CHANGED');
+});
