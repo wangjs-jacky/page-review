@@ -468,7 +468,9 @@
     }
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && state.panel === 'editor') { event.preventDefault(); save(event.shiftKey && !state.draft?.note.id); }
   }
+  chrome.runtime.onMessage.addListener(message => { if (message?.type === 'PAGE_REVIEW_SETTINGS_CHANGED') refresh(); });
   chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && ('enabled' in changes)) refresh(); });
+  window.addEventListener('online', event => { if (event.isTrusted) send('ONLINE').catch(() => {}); });
   globalThis.__pageReviewController = { refresh };
   refresh();
 })();

@@ -1,9 +1,13 @@
 'use strict';
-importScripts('core.js', 'db.js');
+importScripts('core.js', 'db.js', 'cloud-config.js', 'cloud.js');
 const Core = PageReviewCore, DB = PageReviewDB, SCRIPT_ID = 'page-review-pages';
 const SCRIPT_FILES = ['core.js', 'content-style.js', 'content.js'];
 let actionQueue = Promise.resolve(), registrationQueue = Promise.resolve();
 const captures = new Map();
+const Cloud = typeof PageReviewCloudFactory === 'function' ? PageReviewCloudFactory({ db: DB, storage: chrome.storage.local }) : null;
+chrome.storage.local.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(console.error);
+const cloudWorkspace = async () => Cloud ? Cloud.workspace() : undefined;
+const syncCloud = () => { if (Cloud) Cloud.sync().catch(() => {}); };
 const settings = () => chrome.storage.local.get({ enabled: false, dock: { side: 'right', bottom: 24 } });
 const librarySender = sender => sender.id === chrome.runtime.id && sender.url?.split(/[?#]/)[0] === chrome.runtime.getURL('library.html');
 function pageSender(sender) {
@@ -25,9 +29,15 @@ function reconcile() {
   });
   registrationQueue = next; return next;
 }
+async function notifySettings() {
+  if (!chrome.tabs.sendMessage) return;
+  const tabs = await chrome.tabs.query({});
+  await Promise.allSettled(tabs.filter(tab => tab.id).map(tab => chrome.tabs.sendMessage(tab.id, { type: 'PAGE_REVIEW_SETTINGS_CHANGED' })));
+}
 async function setEnabled(enabled) {
   await chrome.storage.local.set({ enabled: Boolean(enabled) });
   await reconcile();
+  await notifySettings();
   return settings();
 }
 chrome.action.onClicked.addListener(tab => {
@@ -40,7 +50,7 @@ chrome.action.onClicked.addListener(tab => {
   }).catch(error => chrome.action.setTitle({ title: `网页评注：${error.message}` }));
 });
 chrome.runtime.onInstalled.addListener(() => { reconcile().catch(console.error); });
-chrome.runtime.onStartup.addListener(() => { reconcile().catch(console.error); });
+chrome.runtime.onStartup.addListener(() => { reconcile().catch(console.error); syncCloud(); });
 chrome.permissions.onRemoved.addListener(() => { reconcile().catch(console.error); });
 // Existing tabs also receive the tool when the user switches to them after enabling.
 chrome.tabs.onActivated?.addListener(({ tabId }) => {
@@ -82,6 +92,7 @@ async function capture(message, sender) {
     const asset = { viewport: await imageData(await context.convertToBlob({ type: 'image/jpeg', quality: 0.88 })), width: bitmap.width, height: bitmap.height, capturedAt: new Date().toISOString() };
     if (message.noteType !== 'page') {
       const crop = new OffscreenCanvas(width, height); crop.getContext('2d').drawImage(bitmap, left, top, width, height, 0, 0, width, height);
+      asset.cropWidth = width; asset.cropHeight = height;
       asset.crop = await imageData(await crop.convertToBlob({ type: 'image/png' }));
     }
     return asset;
@@ -90,8 +101,24 @@ async function capture(message, sender) {
 async function handle(message, sender) {
   if (!message || typeof message.type !== 'string' || sender.id !== chrome.runtime.id) throw new Error('无效请求');
   const ownPage = librarySender(sender) ? null : pageSender(sender);
+  if (message.type.startsWith('CLOUD_')) {
+    if (ownPage || !Cloud) throw new Error('云空间操作仅允许从保存库发起');
+    switch (message.type) {
+      case 'CLOUD_STATUS': return Cloud.status();
+      case 'CLOUD_CONNECT': await Cloud.connect(message); return Cloud.sync();
+      case 'CLOUD_SYNC': return Cloud.sync();
+      case 'CLOUD_DISCONNECT': return Cloud.disconnect();
+      case 'CLOUD_CONNECTIONS': return Cloud.connections();
+      case 'CLOUD_CREATE_CONNECTION': return Cloud.createConnection(message.name);
+      case 'CLOUD_REVOKE': return Cloud.revoke(message.id);
+      case 'CLOUD_REMOTE': try { return await Cloud.remote(message.id); } catch (error) { if (error.status !== 404) throw error; return { id: message.id, deleted: true, note: { comment: '云端记录已删除或不再可读' } }; }
+      case 'CLOUD_FORK': return Cloud.fork(message.id);
+      default: throw new Error('未知云空间操作');
+    }
+  }
   switch (message.type) {
     case 'GET_SETTINGS': return settings();
+    case 'ONLINE': syncCloud(); return true;
     case 'DISABLE': return setEnabled(false);
     case 'SAVE_DOCK': {
       const bottom = Number(message.dock?.bottom);
@@ -118,12 +145,12 @@ async function handle(message, sender) {
         if (ownPage && current.pageId !== ownPage) throw new Error('不能修改其他网页的记录');
         if (message.revision !== current.revision) throw new Error('这条评注已在别处更新，请重新打开后编辑');
         return { ...current, comment: input.comment, feedback: input.feedback, kind: input.kind, originalComment: current.originalComment ?? current.comment, history: [...(current.history || []), { comment: current.comment, feedback: current.feedback ?? null, kind: current.kind, at: timestamp }], updatedAt: timestamp, revision: current.revision + 1 };
-      });
+      }, await cloudWorkspace());
       const note = { ...input, id: crypto.randomUUID(), createdAt: timestamp, updatedAt: timestamp, originalComment: input.comment, revision: 1, locationStatus: 'found', hasImage: Boolean(message.asset) };
       const image = existing ? null : message.asset;
       if (image && ((!/^data:image\/jpeg;base64,/.test(image.viewport || '')) || JSON.stringify(image).length > 16000000)) throw new Error('画面过大或格式无效，请重新截图');
       if (!existing && !image && !message.allowWithoutImage) throw new Error('截图尚未完成，请重试或明确选择仅保存文字');
-      await DB.save(note, image); return note;
+      return DB.save(note, image, await cloudWorkspace());
     }
     case 'LOCATION_RESULTS': {
       if (!ownPage || !Array.isArray(message.results)) return false;
@@ -137,14 +164,14 @@ async function handle(message, sender) {
       return DB.patch(message.id, note => {
         if (note.pageId !== ownPage) throw new Error('找不到本页记录');
         return { ...note, anchor: message.anchor, region: null, type: 'element', pageSignature: String(message.pageSignature || '').slice(0, 6000), locationStatus: 'found', reboundAt: new Date().toISOString(), revision: note.revision + 1, originalAnchor: note.originalAnchor || note.anchor };
-      });
+      }, await cloudWorkspace());
     }
     case 'SET_OUTCOME': {
       if (!librarySender(sender) || !['pending', 'adopted', 'rejected'].includes(message.status)) throw new Error('结果状态无效');
-      return DB.patch(message.id, note => ({ ...note, outcome: { status: message.status, reason: String(message.reason || '').slice(0, 4000), updatedAt: new Date().toISOString() }, revision: note.revision + 1 }));
+      return DB.patch(message.id, note => ({ ...note, outcome: { status: message.status, reason: String(message.reason || '').slice(0, 4000), updatedAt: new Date().toISOString() }, revision: note.revision + 1 }), await cloudWorkspace());
     }
     case 'DELETE': {
-      if (!librarySender(sender)) throw new Error('请在保存库中删除记录'); await DB.remove(message.id); return true;
+      if (!librarySender(sender)) throw new Error('请在保存库中删除记录'); await DB.remove(message.id, await cloudWorkspace()); return true;
     }
     case 'OPEN_NOTE': {
       if (!librarySender(sender)) throw new Error('请从保存库打开原网页');
@@ -158,5 +185,5 @@ async function handle(message, sender) {
   }
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  handle(message, sender).then(value => respond({ ok: true, value }), error => respond({ ok: false, error: error.message || '操作失败' })); return true;
+  handle(message, sender).then(value => { respond({ ok: true, value }); if (['SAVE', 'REBIND', 'SET_OUTCOME', 'DELETE'].includes(message.type)) syncCloud(); }, error => respond({ ok: false, error: error.message || '操作失败' })); return true;
 });

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const prelude = '<script src="/__test/bridge.js" defer></script><script src="/core.js" defer></script><script src="/db.js" defer></script><script src="/background.js" defer></script>';
+const prelude = '<script src="/__test/bridge.js" defer></script><script src="/core.js" defer></script><script src="/db.js" defer></script><script src="/cloud-config.js" defer></script><script src="/cloud.js" defer></script><script src="/background.js" defer></script>';
 const content = '<script src="/content-style.js" defer></script><script src="/content.js" defer></script>';
 const css = `*{box-sizing:border-box}body{margin:0;font:16px/1.9 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#34493e;background:#fff}nav{padding:26px 8vw;border-bottom:1px solid #edf0eb;display:flex;justify-content:space-between}nav a{color:inherit;text-decoration:none;margin-left:22px}main{max-width:900px;margin:60px auto;padding:0 28px}h1{font:600 48px/1.45 Georgia,"PingFang SC",serif;max-width:700px}h2{margin-top:48px;font-size:26px}p{max-width:700px;color:#728071}.kicker{font-size:11px;letter-spacing:2px;color:#a1ad9b}.map{display:flex;gap:14px;background:#edf1e7;padding:35px;border-radius:5px;margin:36px 0}.map button{background:#fff;border:1px solid #dbe3d3;padding:24px;flex:1;font:inherit;color:inherit;cursor:pointer}.tip{opacity:0;min-height:44px;color:#66835c}.map button:hover{background:#dbe8cf}.map button:hover .tip{opacity:1}.long{min-height:550px}.source{font-size:12px;border-top:1px solid #e5ebdf;padding:20px 0}.resource{padding:24px;border:1px solid #dee5da;margin:20px 0}`;
 function page(url) {
@@ -14,9 +14,11 @@ function page(url) {
 const server = http.createServer(async (request, response) => {
   try {
     const name = new URL(request.url, 'http://localhost').pathname;
+    if (name === '/cloud-config.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end('globalThis.PageReviewCloudConfig = ' + JSON.stringify({ apiOrigin: 'http://127.0.0.1:' + port }) + ';'); return; }
+    if (name.startsWith('/v1/')) { const chunks = []; for await (const chunk of request) chunks.push(chunk); const result = await fetch((process.env.PAGE_REVIEW_CLOUD_DEV_URL || 'http://127.0.0.1:8798') + request.url, { method: request.method, headers: { authorization: request.headers.authorization || '', 'content-type': request.headers['content-type'] || '' }, ...(request.method === 'GET' ? {} : { body: Buffer.concat(chunks) }), redirect: 'manual', signal: AbortSignal.timeout(20000) }); const headers = Object.fromEntries(result.headers); delete headers['content-encoding']; delete headers['content-length']; delete headers['transfer-encoding']; response.writeHead(result.status, headers); response.end(Buffer.from(await result.arrayBuffer())); return; }
     if (name === '/content-style.js') { response.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' }); response.end('globalThis.PageReviewStyles = ' + JSON.stringify(await fs.readFile(path.join(project, 'extension/content.css'), 'utf8')) + ';'); return; }
     if (name === '/__test/bridge.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(await fs.readFile(path.join(project, 'tests/browser/bridge.js'))); return; }
-    if (['/core.js', '/db.js', '/background.js', '/content-style.js', '/content.js', '/library.js', '/library.css'].includes(name)) {
+    if (['/core.js', '/db.js', '/background.js', '/content-style.js', '/content.js', '/library.js', '/library.css', '/cloud.js'].includes(name)) {
       response.writeHead(200, { 'content-type': name.endsWith('.css') ? 'text/css' : 'text/javascript', 'cache-control': 'no-store' }); response.end(await fs.readFile(path.join(project, 'extension', name.slice(1)))); return;
     }
     response.writeHead(200, { 'content-type': 'text/html;charset=utf-8', 'cache-control': 'no-store' });
