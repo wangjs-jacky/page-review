@@ -43,6 +43,16 @@ test('不能从当前页写入或重绑其他站点，删除必须从保存库�
   assert.equal((await t.call('DELETE', { id: created.id })).ok, false); assert.equal(t.records.size, 1);
   assert.equal((await t.call('DELETE', { id: created.id }, t.library)).ok, true); assert.equal(t.records.size, 0);
 });
+test('反馈独立保存，修改保留原反馈历史和最初的空评论', async () => {
+  const t = setup();
+  const created = (await t.call('SAVE', { note: { ...sample, comment: '', feedback: 'positive' }, allowWithoutImage: true })).value;
+  assert.equal(created.feedback, 'positive');
+  const edited = (await t.call('SAVE', { note: { ...created, comment: '补充原因', feedback: 'negative' }, revision: 1 })).value;
+  assert.equal(edited.feedback, 'negative'); assert.equal(edited.history[0].feedback, 'positive');
+  const cleared = (await t.call('SAVE', { note: { ...edited, feedback: null }, revision: 2 })).value;
+  assert.equal(cleared.feedback, null); assert.equal(cleared.originalComment, '');
+  assert.equal(cleared.history[1].feedback, 'negative');
+});
 test('截图前核对前台标签；不能误截另一个页面', async () => {
   const t = setup(); t.chrome.tabs.query = async () => [{ id: 2 }];
   const response = await t.call('CAPTURE', { url: t.page.url, viewport: { width: 800, height: 600 } }); assert.equal(response.ok, false); assert.equal(t.calls.captured, 0);

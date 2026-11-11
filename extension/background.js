@@ -117,7 +117,7 @@ async function handle(message, sender) {
       if (existing) return DB.patch(existing.id, current => {
         if (ownPage && current.pageId !== ownPage) throw new Error('不能修改其他网页的记录');
         if (message.revision !== current.revision) throw new Error('这条评注已在别处更新，请重新打开后编辑');
-        return { ...current, comment: input.comment, kind: input.kind, originalComment: current.originalComment || current.comment, history: [...(current.history || []), { comment: current.comment, kind: current.kind, at: timestamp }], updatedAt: timestamp, revision: current.revision + 1 };
+        return { ...current, comment: input.comment, feedback: input.feedback, kind: input.kind, originalComment: current.originalComment ?? current.comment, history: [...(current.history || []), { comment: current.comment, feedback: current.feedback ?? null, kind: current.kind, at: timestamp }], updatedAt: timestamp, revision: current.revision + 1 };
       });
       const note = { ...input, id: crypto.randomUUID(), createdAt: timestamp, updatedAt: timestamp, originalComment: input.comment, revision: 1, locationStatus: 'found', hasImage: Boolean(message.asset) };
       const image = existing ? null : message.asset;

@@ -26,7 +26,7 @@ test('中文页面显著变化可与局部小改区分', () => {
   const a = '这篇文章讨论信息组织，如何通过目录与关联内容帮助读者查找资料。';
   assert(Core.similarity(a, a + '补充一个新例子。') > 0.8); assert(Core.similarity(a, 'Welcome to the company investor presentation 2027') < 0.46);
 });
-test('拒绝空评注、超长输入和非网页来源；原始口语不被重写', () => {
+test('拒绝无评论且无反馈、超长输入和非网页来源；原始口语不被重写', () => {
   const note = { url: 'https://example.com/read', comment: '  不喜欢这里。说明能少点，但资料来源不要删。  ', type: 'element' };
   assert.equal(Core.safeNote(note).comment, '不喜欢这里。说明能少点，但资料来源不要删。');
   assert.throws(() => Core.safeNote({ ...note, comment: '' })); assert.throws(() => Core.safeNote({ ...note, comment: 'a'.repeat(12001) })); assert.throws(() => Core.safeNote({ ...note, url: 'javascript:alert(1)' }));
@@ -37,6 +37,19 @@ test('CRC32符合标准向量，ZIP支持中文、二进制与外部unzip解包'
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'page-review-test-')), file = path.join(dir, 'bundle.zip');
   try { fs.writeFileSync(file, bytes); execFileSync('unzip', ['-t', file]); assert.deepEqual(execFileSync('unzip', ['-p', file, 'asset.bin']), Buffer.from([0, 255, 1, 128])); } finally { fs.rmSync(dir, { recursive: true }); }
   assert.throws(() => Core.zip([{ name: '../unsafe', data: 'x' }]));
+});
+test('点赞点踩可以单独保存，未选择保持未知，旧分类不推断为偏好', () => {
+  const sample = { url: 'https://example.com/read', type: 'element', comment: '' };
+  assert.equal(Core.safeNote({ ...sample, feedback: 'positive' }).feedback, 'positive');
+  assert.equal(Core.safeNote({ ...sample, feedback: 'negative' }).comment, '');
+  assert.throws(() => Core.safeNote({ ...sample, feedback: 'anything' }));
+  const old = Core.safeNote({ ...sample, comment: '这里有个问题', kind: 'problem' });
+  assert.equal(old.feedback, null);
+  const pack = Core.readingPackage([{ ...old, id: 'old-note', createdAt: '2026-11-11' }, { ...Core.safeNote({ ...sample, feedback: 'negative' }), id: 'vote-only', createdAt: '2026-11-11' }], {}, '比较这些反馈');
+  assert.equal(pack.manifest.annotations[0].feedback, null);
+  assert.equal(pack.manifest.annotations[1].feedback, 'negative');
+  assert(pack.markdown.includes('用户明确反馈：未评价'));
+  assert(pack.markdown.includes('用户明确反馈：👎 不喜欢'));
 });
 test('多页AI包保留原话、负例、历史、采纳理由和图片对应；缺图不冒充完成', () => {
   const notes = [{ id: 'note-0001', pageId: 'https://one.example/', url: 'https://one.example/', title: '一', type: 'element', comment: '说明太多，但更新时间要保留', kind: 'problem', createdAt: '2026-11-11', originalComment: '原意见', history: [{ comment: '原意见' }], outcome: { status: 'rejected', reason: '保留必要信息' } }, { id: 'note-0002', pageId: 'https://two.example/', url: 'https://two.example/', title: '二', comment: '分区悬停很清晰', type: 'region', screenshotError: '未获截图权限', createdAt: '2026-11-11' }];
@@ -54,4 +67,8 @@ test('靠近视口边缘或短视口的评论框仍可完整操作', () => {
     const position = Core.placePopover({ left: viewport.width - 20, top: viewport.height - 20, width: 20, height: 20 }, viewport, panel);
     assert(position.left >= 15); assert(position.left + panel.width <= viewport.width - 15); assert(position.top >= 15); assert(position.top + panel.height <= viewport.height - 15);
   }
+});
+test('紧凑评论靠近底部时翻到选区上方，不为旧大面板预留空白', () => {
+  const result = Core.placePopover({ left: 200, top: 720, width: 500, height: 80 }, { width: 1440, height: 844 }, { width: 420, height: 50 });
+  assert.equal(result.top, 654);
 });
