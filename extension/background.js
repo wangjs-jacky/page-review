@@ -104,6 +104,7 @@ async function handle(message, sender) {
   if (message.type.startsWith('CLOUD_')) {
     if (ownPage || !Cloud) throw new Error('云空间操作仅允许从保存库发起');
     switch (message.type) {
+      case 'CLOUD_LOGIN': return Cloud.login(message);
       case 'CLOUD_STATUS': return Cloud.status();
       case 'CLOUD_CONNECT': await Cloud.connect(message); return Cloud.sync();
       case 'CLOUD_SYNC': return Cloud.sync();

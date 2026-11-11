@@ -20,8 +20,12 @@
     };
   }
   globalThis.__captureQueue = [];
+  globalThis.__loginQueue = [];
+  const realFetch=globalThis.fetch.bind(globalThis);
+  globalThis.fetch=(input,options)=>{if(typeof input==='string' && input.startsWith('https://review.paws.rodeo/')){const u=new URL(input);return realFetch(location.origin+u.pathname+u.search,options);}return realFetch(input,options);};
   globalThis.importScripts = () => {}; // The same files are loaded as ordered scripts below.
   globalThis.chrome = {
+    identity: { getRedirectURL: () => "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.chromiumapp.org/page-review", launchWebAuthFlow: options => new Promise((resolve,reject) => globalThis.__loginQueue.push({ options, resolve, reject })) },
     runtime: {
       id: 'page-review-browser-integration', getURL: name => new URL('/' + name, location.origin).href,
       onInstalled: { addListener: listener => installed.push(listener) }, onStartup: { addListener: listener => startup.push(listener) },

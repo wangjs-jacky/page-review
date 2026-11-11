@@ -39,7 +39,7 @@ function icon(size) {
 }
 await fs.mkdir(path.join(output, 'icons'), { recursive: true });
 for (const size of [16, 32, 48, 128]) { const name = `icons/${size}.png`; await fs.writeFile(path.join(output, name), icon(size)); files.push(name); }
-const selectedOrigin = process.env.PAGE_REVIEW_CLOUD_ORIGIN || null;
+const selectedOrigin = process.env.PAGE_REVIEW_CLOUD_ORIGIN || 'https://review.paws.rodeo';
 if (selectedOrigin) { const url = new URL(selectedOrigin); if (url.protocol !== 'https:' || url.origin !== selectedOrigin) throw new Error('云空间需要确定的HTTPS源地址'); }
 const builtManifest = { ...manifest, content_security_policy: { extension_pages: manifest.content_security_policy.extension_pages.replace("connect-src 'none'", selectedOrigin ? 'connect-src ' + selectedOrigin : "connect-src 'none'") } };
 await fs.writeFile(path.join(output, 'manifest.json'), JSON.stringify(builtManifest, null, 2) + '\n');

@@ -1,3 +1,4 @@
+import { loginRoute } from './login.mjs';
 // Personal cloud library. No model execution, timers, scheduled tasks or public asset bucket.
 const ID = /^[a-zA-Z0-9-]{8,80}$/, SHA = /^[a-f0-9]{64}$/;
 const MAX_JSON = 700_000, MAX_IMAGE = 8_000_000;
@@ -24,7 +25,7 @@ const result = x => x.results || [];
 async function identity(request, db) {
   const token = request.headers.get('authorization')?.match(/^Bearer (pr_[A-Za-z0-9_-]{32,})$/)?.[1];
   requireThat(token, 401, 'unauthorized', '连接无效或已撤销');
-  const who = await db.prepare('SELECT id,workspace_id,kind FROM tokens WHERE token_hash=? AND revoked_at IS NULL').bind(await digest(token)).first();
+  const who = await db.prepare('SELECT id,workspace_id,kind FROM tokens WHERE token_hash=? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)').bind(await digest(token), new Date().toISOString()).first();
   requireThat(who, 401, 'unauthorized', '连接无效或已撤销'); return who;
 }
 function validateNote(note, assets) {
@@ -83,11 +84,13 @@ async function commit(request, db, who, id, deleting) {
 }
 async function route(request, env) {
   const url = new URL(request.url), path = url.pathname, method = request.method;
-  if (path === '/health' && method === 'GET') return json({ service: 'page-review', version: '0.2.0' });
+  if (path === '/health' && method === 'GET') return json({ service: 'page-review', version: '0.3.0' });
+  const login = await loginRoute(request, env); if (login) return login;
   requireThat(path.startsWith('/v1/'), 404, 'not_found', '接口不存在');
   const db = env.DB.withSession ? env.DB.withSession('first-primary') : env.DB, who = await identity(request, db);
   if (method !== 'GET') requireThat(who.kind === 'writer', 403, 'read_only', 'Agent连接仅允许读取');
-  if (path === '/v1/me' && method === 'GET') return json({ workspaceId: who.workspace_id, access: who.kind });
+  if (path === '/v1/me' && method === 'GET') { const user = await db.prepare('SELECT name FROM users WHERE workspace_id=?').bind(who.workspace_id).first(); return json({ workspaceId: who.workspace_id, access: who.kind, name: user?.name || null }); }
+  if (path === '/v1/session' && method === 'DELETE') { await db.prepare("UPDATE tokens SET revoked_at=? WHERE id=? AND kind='writer'").bind(new Date().toISOString(), who.id).run(); return json({ signedOut: true }); }
   if (path === '/v1/connections') {
     requireThat(who.kind === 'writer', 403, 'owner_required', '只有资料库拥有者可管理连接');
     if (method === 'GET') return json({ items: result(await db.prepare("SELECT id,name,created_at,revoked_at,last_read_at FROM tokens WHERE workspace_id=? AND kind='reader' ORDER BY created_at DESC").bind(who.workspace_id).all()) });

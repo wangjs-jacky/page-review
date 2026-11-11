@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Page Review · 网页评注",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "标下网页上值得关注的地方，保存评注和画面，跨网页整理给 AI。",
   "minimum_chrome_version": "120",
   "permissions": [
     "activeTab",
     "scripting",
-    "storage"
+    "storage",
+    "identity"
   ],
   "host_permissions": [
     "<all_urls>"
