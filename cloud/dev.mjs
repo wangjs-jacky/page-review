@@ -11,6 +11,8 @@ const mf = new Miniflare(runtime.convertV4MiniflareOptions ? runtime.convertV4Mi
 await mf.ready;
 const db = await mf.getD1Database('DB');
 for (const statement of (await fs.readFile(path.join(root, 'cloud/migrations/0001.sql'), 'utf8')).split(';').map(x => x.trim()).filter(Boolean)) await db.prepare(statement).run();
+const columns=(await db.prepare('PRAGMA table_info(tokens)').all()).results;
+for(const statement of (await fs.readFile(path.join(root,'cloud/migrations/0002-login.sql'),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)){if(statement.startsWith('ALTER TABLE')&&columns.some(c=>c.name==='expires_at'))continue;await db.prepare(statement).run();}
 const file = path.join(root, '.local/owner.json'); let owner;
 try { owner = JSON.parse(await fs.readFile(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; owner = { apiUrl: (await mf.ready).origin, token: 'pr_' + randomBytes(32).toString('hex'), workspaceId: randomUUID() }; await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, JSON.stringify(owner, null, 2), { mode: 0o600, flag: 'wx' }); }
 await db.prepare('INSERT OR IGNORE INTO workspaces(id,created_at) VALUES(?,?)').bind(owner.workspaceId, new Date().toISOString()).run();

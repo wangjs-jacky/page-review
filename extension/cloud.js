@@ -1,29 +1,46 @@
 (function (root) {
   'use strict';
-  root.PageReviewCloudFactory = function ({ db, storage, fetcher = fetch, apiOrigin = root.PageReviewCloudConfig?.apiOrigin }) {
+  root.PageReviewCloudFactory = function ({ db, storage, fetcher = fetch, apiOrigin = root.PageReviewCloudConfig?.apiOrigin, identity = root.chrome?.identity }) {
     let chain = Promise.resolve();
     const config = async () => (await storage.get('cloudConnection')).cloudConnection || null;
     const workspace = async () => (await config())?.workspaceId;
     const hash = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x => x.toString(16).padStart(2, '0')).join('');
     async function request(c, path, options = {}, binary = false) {
       const response = await fetcher(c.apiUrl + path, { ...options, redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { ...options.headers, Authorization: 'Bearer ' + c.token } });
-      if (!response.ok) { let error; try { error = await response.json(); } catch { error = { message: '云空间请求失败（' + response.status + '）' }; } const e = new Error(error.message); Object.assign(e, error, { status: response.status }); throw e; }
+      if (!response.ok) { if (response.status === 401) { const current = await config(); if (current?.token === c.token) await storage.set({ cloudConnection: { ...current, authenticationRequired: true } }); } let error; try { error = await response.json(); } catch { error = { message: '云空间请求失败（' + response.status + '）' }; } const e = new Error(response.status === 401 ? '登录已失效，请重新登录；本机标注仍保留' : error.message); Object.assign(e, error, { status: response.status }); throw e; }
       return binary ? response : response.json();
     }
     async function status() {
       const c = await config(), pending = await db.pending?.();
-      return { configured: Boolean(c), apiUrl: c?.apiUrl || apiOrigin || '', serviceConfigured: Boolean(apiOrigin), workspaceId: c?.workspaceId || null, pending: (pending || []).filter(x => x.workspaceId === c?.workspaceId).map(x => ({ id: x.id, kind: x.kind, conflict: Boolean(x.conflict), error: x.error || '', localComment: x.note.comment, remoteRevision: x.remoteConflictRevision })), last: (await storage.get('cloudSyncResult')).cloudSyncResult || null };
+      return { configured: Boolean(c && !c.authenticationRequired && c.apiUrl === apiOrigin && (!c.expiresAt || Date.parse(c.expiresAt) > Date.now())), name: c?.name || '', apiUrl: apiOrigin || '', serviceConfigured: Boolean(apiOrigin), workspaceId: c?.workspaceId || null, pending: (pending || []).filter(x => x.workspaceId === c?.workspaceId).map(x => ({ id: x.id, kind: x.kind, conflict: Boolean(x.conflict), error: x.error || '', localComment: x.note.comment, remoteRevision: x.remoteConflictRevision })), last: (await storage.get('cloudSyncResult')).cloudSyncResult || null };
     }
-    async function connect({ apiUrl, token, migrateExisting = false }) {
+    async function connect({ apiUrl, token, migrateExisting = false, expiresAt, name }) {
       if (!apiOrigin || new URL(apiUrl).origin !== apiOrigin || new URL(apiUrl).href.replace(/\/$/, '') !== apiOrigin) throw new Error('请使用安装包配置的云空间地址');
       if (!/^pr_[A-Za-z0-9_-]{32,}$/.test(token || '')) throw new Error('写入连接凭证格式无效');
       const proposed = { apiUrl: apiOrigin, token }, who = await request(proposed, '/v1/me');
       if (who.access !== 'writer') throw new Error('插件需要拥有者写入连接，不能使用Agent只读连接');
-      const previous = await config(), pending = await db.pending();
-      if ((previous && previous.workspaceId !== who.workspaceId) || pending.some(x => x.workspaceId !== who.workspaceId) || (db.list && (await db.list()).some(n => n.cloud?.workspaceId && n.cloud.workspaceId !== who.workspaceId))) throw new Error('存在另一云空间的记录，请先处理原连接，不能自动混合资料');
-      await storage.set({ cloudConnection: { ...proposed, workspaceId: who.workspaceId } });
+      const pending = await db.pending();
+      if (pending.some(x => x.workspaceId !== who.workspaceId) || (db.list && (await db.list()).some(n => n.cloud?.workspaceId && n.cloud.workspaceId !== who.workspaceId))) throw new Error('此浏览器保留了另一个账号的资料，请先使用原账号处理，未混合或上传这些记录');
+      await storage.set({ cloudConnection: { ...proposed, workspaceId: who.workspaceId, ...(expiresAt ? { expiresAt } : {}), name: name || who.name || '' } });
       if (migrateExisting) await db.enroll(who.workspaceId);
       return status();
+    }
+    async function login({ migrateExisting = false } = {}) {
+      if (!apiOrigin || !identity?.launchWebAuthFlow || !identity?.getRedirectURL) throw new Error('此安装包暂不能发起账号登录');
+      const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const verifier = b64(crypto.getRandomValues(new Uint8Array(32))), state = b64(crypto.getRandomValues(new Uint8Array(32)));
+      const challenge = b64(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))), callback = identity.getRedirectURL('page-review');
+      const start = new URL('/auth/start', apiOrigin); for (const [key, value] of Object.entries({ redirect_uri: callback, state, code_challenge: challenge })) start.searchParams.set(key, value);
+      const returned = await identity.launchWebAuthFlow({ url: start.href, interactive: true });
+      if (!returned) throw new Error('登录已取消，本机标注仍保留');
+      const url = new URL(returned);
+      if (url.origin + url.pathname !== callback || url.searchParams.get('state') !== state || !/^[A-Za-z0-9_-]{43}$/.test(url.searchParams.get('code') || '')) throw new Error('登录回跳校验失败，未保存任何连接');
+      const response = await fetcher(apiOrigin + '/auth/exchange', { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: url.searchParams.get('code'), verifier }) });
+      if (!response.ok) throw new Error('登录未完成，请重新登录');
+      const signed = await response.json();
+      try { await connect({ apiUrl: apiOrigin, ...signed, migrateExisting }); }
+      catch (error) { await request({ apiUrl: apiOrigin, token: signed.token }, '/v1/session', { method: 'DELETE' }).catch(() => {}); throw error; }
+      return sync();
     }
     async function upload(c, image) {
       const refs = []; if (!image) return refs;
@@ -37,7 +54,7 @@
       } return refs;
     }
     async function runBatch() {
-      const c = await config(); if (!c) return status();
+      const c = await config(); if (!c || c.authenticationRequired || c.apiUrl !== apiOrigin || (c.expiresAt && Date.parse(c.expiresAt) <= Date.now())) return status();
       const entries = (await db.pending(c.workspaceId)).slice(0, 100); let synced = 0, failed = 0;
       for (const entry of entries) {
         if (entry.conflict) { failed++; continue; }
@@ -53,13 +70,13 @@
     }
     // One finite batch per actual save/startup/online/manual event; no timer or query loop.
     function sync() { const work = chain.catch(() => {}).then(runBatch); chain = work; return work; }
-    async function disconnect() { await chain.catch(() => {}); await storage.remove('cloudConnection'); return status(); }
+    async function disconnect() { await chain.catch(() => {}); const c = await config(); if (c && c.apiUrl === apiOrigin) await request(c, '/v1/session', { method: 'DELETE' }); await storage.remove('cloudConnection'); return status(); }
     async function connections() { const c = await config(); if (!c) return { items: [] }; return request(c, '/v1/connections'); }
-    async function createConnection(name) { const c = await config(); if (!c) throw new Error('请先连接云空间'); return request(c, '/v1/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); }
-    async function revoke(id) { const c = await config(); if (!c) throw new Error('请先连接云空间'); return request(c, '/v1/connections/' + encodeURIComponent(id), { method: 'DELETE' }); }
-    async function remote(id) { const c = await config(); if (!c) throw new Error('请先连接云空间'); return request(c, '/v1/annotations/' + encodeURIComponent(id)); }
+    async function createConnection(name) { const c = await config(); if (!c) throw new Error('请先登录账号'); return request(c, '/v1/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); }
+    async function revoke(id) { const c = await config(); if (!c) throw new Error('请先登录账号'); return request(c, '/v1/connections/' + encodeURIComponent(id), { method: 'DELETE' }); }
+    async function remote(id) { const c = await config(); if (!c) throw new Error('请先登录账号'); return request(c, '/v1/annotations/' + encodeURIComponent(id)); }
     async function fork(id) {
-      const c = await config(); if (!c) throw new Error('请先连接云空间'); let record;
+      const c = await config(); if (!c) throw new Error('请先登录账号'); let record;
       try { record = await remote(id); } catch (error) { if (error.status !== 404) throw error; record = null; }
       let image;
       if (record?.assets.length) {
@@ -74,6 +91,6 @@
       }
       await db.forkConflict(id, c.workspaceId, record, image); return sync();
     }
-    return { status, workspace, connect, sync, disconnect, connections, createConnection, revoke, remote, fork };
+    return { status, workspace, connect, login, sync, disconnect, connections, createConnection, revoke, remote, fork };
   };
 })(globalThis);
