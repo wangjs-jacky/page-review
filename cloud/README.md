@@ -1,6 +1,6 @@
 # 私人云空间与Agent接入
 
-实现为个人资料服务：Chrome负责采集，Workers API负责鉴权与请求，D1保存元数据和凭证摘要，R2保存私有原画面和裁图。Agent在自己的宿主中运行，不由本服务托管。当前已有可运行实现和本机验证，真实Cloudflare部署仍待D1/R2权限授权；不把健康页或静态设计稿当作上线证明。
+实现为个人资料服务：Chrome负责采集，Workers API负责鉴权与请求，D1保存元数据和凭证摘要，R2保存私有原画面和裁图。Agent在自己的宿主中运行，不由本服务托管。当前已部署真实Cloudflare服务，并用合成资料完成D1/R2保存、独立Skill检索/读图、断网恢复、隔离及撤销验收；原生Chrome安装与另一宿主自动发现仍待验证。
 
 ## 一次性接入
 
@@ -34,8 +34,8 @@ workspace从凭证确定，不接收客户端owner选择。D1事务同时保存�
 
 1. 在目标账户准备Workers、D1与R2权限，沿已启用套餐处理；没有授权不购买或升级。只创建本项目独立资源，保留其他应用。
 2. 使用Wrangler创建page-review-cloud数据库及page-review-cloud-files私有桶。复制配置到被忽略的.local/，填入真实database_id、账户和正确相对入口路径；也可先在原模板填真实非秘密资源ID再按项目政策管理。不要将R2设为公有。
-3. 对指定数据库执行cloud/migrations/0001.sql，部署Worker并读回实际API源地址与绑定。
-4. 运行下面的初始化脚本，在私有目录生成拥有者连接和仅含摘要的SQL。对该D1执行owner-seed.sql；raw token不进入命令参数或SQL。
+3. 对指定数据库初始化cloud/migrations/0001.sql，部署Worker并读回实际API源地址、活动版本与绑定。遵守禁止轮询约束时使用D1单次query请求；本次缓存Wrangler的execute --file路径内部含轮询，不要使用。
+4. 运行下面的初始化脚本，在私有目录生成拥有者连接和仅含摘要的SQL。读取owner-seed.sql的hash-only内容，用D1单次query请求执行；raw token不进入命令参数或SQL，也不进入安装包。
 
 ```sh
 node cloud/provision-owner.mjs https://your-api.example .local/production
@@ -43,7 +43,7 @@ node cloud/provision-owner.mjs https://your-api.example .local/production
 
 5. 用实际API源构建插件，先用合成资料验证：上传并提交 → 卸载测试页面 → 独立进程检索/读图 → 撤销拒绝元数据与图片 → 断网恢复及重复提交。然后再由用户选择是否迁移真实本机资料。
 
-初始化脚本不自动创建或部署资源；已有文件会拒绝覆盖。数据库迁移幂等且不删除旧记录。当前0.2.0候选尚未发布新的GitHub Release或替换0.1.2安装包。
+初始化脚本不自动创建或部署资源；已有文件会拒绝覆盖。数据库迁移幂等且不删除旧记录。0.2.0以独立云版预发布包分发，构建精确放行实际服务源。旧版更新仍保留原插件目录及身份，不先卸载；真实旧记录不会自动迁移。
 
 ## 本机验证
 

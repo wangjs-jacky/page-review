@@ -2,7 +2,7 @@
 
 在正常Chrome浏览中点选或框选网页，留下原评论和可选的👍/👎，保存当时画面。插件只有一个工具栏图标，页面内使用可关闭、拖动及归位右下角的悬浮球；无需把网页导入独立网站。
 
-当前分支实现0.2.0云空间链路，尚未部署到Cloudflare。已发布的[v0.1.2](https://github.com/wangjs-jacky/page-review/releases/tag/v0.1.2)仍是本地版，不具备云同步。部署、Agent接入和真实验证范围见[云空间说明](cloud/README.md)。
+0.2.0云空间已部署，并完成真实D1/R2保存、独立Skill读取、断网恢复与连接撤销验收。[云版预发布安装包](https://github.com/wangjs-jacky/page-review/releases/tag/v0.2.0)需首次配置私人连接；旧v0.1.2仍是本地版。接入步骤和验证范围见[云空间说明](cloud/README.md)。
 
 ## 使用方式
 
