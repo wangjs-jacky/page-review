@@ -44,3 +44,14 @@ test('多页AI包保留原话、负例、历史、采纳理由和图片对应；
   const pack = Core.readingPackage(notes, { 'note-0001': { viewport: png, crop: png } }, '比较内容组织');
   assert.equal(pack.manifest.pages.length, 2); assert.equal(pack.manifest.annotations[0].images.viewport, 'assets/note-0001/viewport.png'); assert.equal(pack.manifest.annotations[0].outcome.reason, '保留必要信息'); assert(pack.markdown.includes('说明太多，但更新时间要保留')); assert(pack.markdown.includes('没有截图：未获截图权限'));
 });
+test('评论浮层跟随选中内容附近，而不是固定在右下角入口', () => {
+  const position = Core.placePopover({ left: 200, top: 200, width: 500, height: 200 }, { width: 1440, height: 1000 }, { width: 360, height: 240 });
+  assert.deepEqual(position, { left: 300, top: 416 });
+});
+test('靠近视口边缘或短视口的评论框仍可完整操作', () => {
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }, { width: 1440, height: 300 }]) {
+    const panel = { width: Math.min(360, viewport.width - 30), height: Math.min(260, viewport.height - 30) };
+    const position = Core.placePopover({ left: viewport.width - 20, top: viewport.height - 20, width: 20, height: 20 }, viewport, panel);
+    assert(position.left >= 15); assert(position.left + panel.width <= viewport.width - 15); assert(position.top >= 15); assert(position.top + panel.height <= viewport.height - 15);
+  }
+});

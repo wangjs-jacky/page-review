@@ -3,6 +3,9 @@
   if (globalThis.__pageReviewController) { globalThis.__pageReviewController.refresh(); return; }
   const Core = PageReviewCore;
   const I = {
+    select: '<path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8-5 3 7 2-4 4-2-7-3Z"/>',
+    hide: '<path d="m3 3 18 18M9.5 5.3A12 12 0 0 1 12 5c6 0 10 7 10 7a20 20 0 0 1-4 4M6 6a22 22 0 0 0-4 6s4 7 10 7a12 12 0 0 0 5-1M10 10a3 3 0 0 0 4 4"/>',
+    pin: '<path d="M19 10c0 5-7 11-7 11s-7-6-7-11a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>',
     pen: '<path d="m16 3 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L3 16l-1 6Z"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     area: '<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 3"/>',
@@ -14,7 +17,7 @@
     image: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m3 17 6-6 4 4 3-3 5 5"/><circle cx="8" cy="8" r="1"/>',
     arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>'
   };
-  const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[name] || I.note}</svg>`;
+  const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[name] || I.note}</svg>`;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const labels = { found: '已定位', uncertain: '位置待确认', missing: '原位置失效', changed: '页面已明显变化' };
   const kinds = { observation: '观察', like: '优点', problem: '问题' };
@@ -104,7 +107,12 @@
     document.documentElement.append(host);
     controller = new AbortController(); const options = { signal: controller.signal };
     shadow.addEventListener('click', action, options);
-    shadow.addEventListener('input', event => { if (event.target.id === 'review-comment' && state.draft) state.draft.note.comment = event.target.value; }, options);
+    shadow.addEventListener('input', event => {
+      if (event.target.id === 'review-comment' && state.draft) {
+        state.draft.note.comment = event.target.value;
+        shadow.querySelectorAll('[data-action="save"],[data-action="save-continue"]').forEach(button => { button.disabled = state.busy || !event.target.value.trim(); });
+      }
+    }, options);
     shadow.addEventListener('pointerdown', orbDown, options);
     document.addEventListener('click', selectClick, { ...options, capture: true });
     document.addEventListener('pointermove', pointerMove, { ...options, capture: true });
@@ -142,25 +150,55 @@
     else { state.panel = null; state.mode = 'browse'; renderPanel(); }
     loadNotes().catch(error => toast(error.message));
   }
-  function schedulePosition() { if (!frame) frame = requestAnimationFrame(() => { frame = null; positionWidget(); renderMarkers(); if (state.hover) highlight(state.hover.getBoundingClientRect()); }); }
+  function currentAnchor() {
+    if (state.panel === 'editor' && state.draft) {
+      const d = state.draft;
+      if (d.note.type === 'page') return null;
+      if (d.target?.isConnected) {
+        const r = d.target.getBoundingClientRect(), area = d.note.region;
+        return d.note.type === 'region' && area ? { left: r.left + r.width * area.x, top: r.top + r.height * area.y, width: r.width * area.w, height: r.height * area.h } : r;
+      }
+      return d.rect;
+    }
+    if (state.panel === 'peek' && state.peek) {
+      const note = state.notes.find(note => note.id === state.peek.id), match = state.matches.get(state.peek.id);
+      return note && match?.status === 'found' && note.type !== 'page' ? markRect(note, match) : null;
+    }
+    return null;
+  }
+  function schedulePosition() {
+    if (!frame) frame = requestAnimationFrame(() => {
+      frame = null; positionWidget(); renderMarkers();
+      const rect = currentAnchor();
+      if (rect) highlight(rect, state.draft?.note.type === 'region' ? 0 : 5);
+      else if (state.hover) highlight(state.hover.getBoundingClientRect());
+    });
+  }
   function dockPosition() {
-    const y = Math.max(12, innerHeight - Math.max(16, state.dock.bottom) - 48);
-    return { x: state.dock.side === 'left' ? 16 : Math.max(12, innerWidth - 64), y };
+    const y = Math.max(12, innerHeight - Math.max(16, state.dock.bottom) - 44);
+    return { x: state.dock.side === 'left' ? 16 : Math.max(12, innerWidth - 60), y };
   }
   function positionWidget(raw) {
     if (!shadow) return;
     const wrap = shadow.querySelector('.orb-wrap'), panel = shadow.querySelector('.panel'); const p = raw || dockPosition();
-    if (wrap) Object.assign(wrap.style, { left: Math.max(12, Math.min(innerWidth - 60, p.x)) + 'px', top: Math.max(12, Math.min(innerHeight - 60, p.y)) + 'px' });
-    if (panel) {
+    if (wrap) Object.assign(wrap.style, { left: Math.max(12, Math.min(innerWidth - 56, p.x)) + 'px', top: Math.max(12, Math.min(innerHeight - 56, p.y)) + 'px' });
+    if (panel?.classList.contains('drawer')) return;
+    if (panel?.classList.contains('popover')) {
+      const rect = panel.getBoundingClientRect(), anchor = currentAnchor();
+      const visible = anchor && anchor.top + anchor.height > 0 && anchor.top < innerHeight;
+      const position = Core.placePopover(visible ? anchor : null, { width: innerWidth, height: innerHeight }, rect);
+      Object.assign(panel.style, { left: position.left + 'px', top: position.top + 'px' });
+    } else if (panel) {
       const rect = panel.getBoundingClientRect(), gap = 12;
-      const left = Math.max(12, Math.min(state.dock.side === 'left' ? p.x + 60 : p.x - rect.width - gap, innerWidth - rect.width - 12));
-      const top = Math.max(12, Math.min(p.y + 48 - rect.height, innerHeight - rect.height - 12));
+      const left = Math.max(12, Math.min(state.dock.side === 'left' ? p.x + 56 : p.x - rect.width - gap, innerWidth - rect.width - 12));
+      const top = Math.max(12, Math.min(p.y + 44 - rect.height, innerHeight - rect.height - 12));
       Object.assign(panel.style, { left: left + 'px', top: top + 'px' });
     }
   }
   function renderWidget() {
     if (!shadow) return;
-    shadow.getElementById('widget').innerHTML = `<div class="orb-wrap"><button class="orb ${state.mode !== 'browse' ? 'active' : ''}" data-action="toggle" aria-label="打开网页评注" aria-expanded="${Boolean(state.panel)}" title="网页评注 · 可拖动；菜单可收起到右下角">${icon('pen')}</button>${state.notes.length ? `<span class="count">${state.notes.length}</span>` : ''}<button class="orb-close" data-action="disable" aria-label="关闭网页评注" title="关闭，点击 Chrome 插件图标重新启用">${icon('close')}</button></div>`;
+    const active = state.mode !== 'browse';
+    shadow.getElementById('widget').innerHTML = `<div class="orb-wrap"><button class="orb floating-orb ${active ? 'is-marking' : ''} ${state.dock.side === 'left' ? 'docked-left' : ''}" data-action="toggle" aria-label="打开网页评注" aria-expanded="${state.panel === 'menu'}" data-hint="${active ? '正在标注 · 点击切换方式' : '网页评注 · 拖动可换位置'}">${icon(active ? 'select' : 'pen')}${state.notes.length ? `<span class="orb-count">${state.notes.length}</span>` : ''}</button><button class="orb-close" data-action="disable" aria-label="关闭网页评注" title="关闭，点击 Chrome 插件图标重新启用">${icon('close')}</button></div>`;
     positionWidget();
     renderHint();
   }
@@ -184,42 +222,77 @@
       const match = state.matches.get(note.id); if (match?.status !== 'found') return;
       const r = markRect(note, match); if (!r || r.top > innerHeight || r.top + r.height < 0 || r.left > innerWidth || r.left + r.width < 0) return;
       const base = `${Math.round(r.left)},${Math.round(r.top)}`, count = positions.get(base) || 0; positions.set(base, count + 1);
-      const button = document.createElement('button'); button.className = 'pin'; button.dataset.action = 'peek'; button.dataset.id = note.id; button.textContent = String(index + 1).padStart(2, '0'); button.setAttribute('aria-label', `查看评注 ${index + 1}：${note.label}`);
+      const button = document.createElement('button'); button.className = 'pin note-pin'; button.dataset.action = 'peek'; button.dataset.id = note.id; button.textContent = String(index + 1).padStart(2, '0'); button.setAttribute('aria-label', `查看评注 ${index + 1}：${note.label}`);
       Object.assign(button.style, { left: Math.max(4, Math.min(innerWidth - 29, r.left - 12 + count * 26)) + 'px', top: Math.max(4, r.top - 12) + 'px' }); markerRoot.append(button);
-      if (note.type === 'region') { const box = document.createElement('div'); box.className = 'region'; Object.assign(box.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' }); markerRoot.append(box); }
+      if (note.type === 'region') { const box = document.createElement('div'); box.className = 'region region-saved'; Object.assign(box.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' }); markerRoot.append(box); }
     });
   }
-  function panelHead(title, subtitle = '') { return `<header class="panel-head"><div><h2>${esc(title)}</h2>${subtitle ? `<small>${esc(subtitle)}</small>` : ''}</div><button class="icon" data-action="minimize" aria-label="收起到右下角" title="收起到右下角">${icon('close')}</button></header>`; }
+  function panelHead(title, subtitle = '') {
+    return `<header class="orb-menu-head"><div><strong>${esc(title)}</strong>${subtitle ? `<span>${esc(subtitle)}</span>` : ''}</div><button class="icon-btn" data-action="minimize" aria-label="收起到右下角" title="收起到右下角">${icon('close')}</button></header>`;
+  }
+  function statusMarkup(status) {
+    return `<span class="status-label ${status === 'found' ? '' : status === 'uncertain' ? 'warning' : 'stale'}">${icon(status === 'found' ? 'pin' : 'note')}${labels[status] || '位置待确认'}</span>`;
+  }
   function renderPanel(focus = false) {
     if (!shadow) return;
     let html = '';
     if (state.panel === 'menu') {
-      html = `<section class="panel" role="dialog" aria-label="网页评注操作">${panelHead('网页评注', `本页 ${state.notes.length} 条记录`)}<div class="body">${state.mode !== 'browse' ? `<div class="mode-label">${state.mode === 'area' ? '正在框选区域' : '正在点选对象'}<button data-action="finish">完成标注</button></div>` : ''}<button class="primary wide" data-action="point">${icon('pen')}开始标注</button><div class="two"><button class="secondary" data-action="area">框选区域</button><button class="secondary" data-action="page">整页评注</button></div><button class="menu-line" data-action="notes">${icon('note')}<span>本页评注</span>${state.notes.length}</button><button class="menu-line" data-action="markers">${icon('eye')}<span>${state.showMarkers ? '隐藏页面标记' : '显示页面标记'}</span></button><button class="menu-line" data-action="library">${icon('book')}<span>全部保存的网页</span>${icon('arrow')}</button></div><footer class="footer"><button class="link" data-action="minimize">收起到右下角</button><button class="link danger" data-action="disable">关闭网页评注</button></footer></section>`;
+      html = `<section class="panel orb-menu" role="dialog" aria-label="网页评注操作">
+        ${panelHead('网页评注', `本页 ${state.notes.length} 条记录`)}
+        ${state.mode !== 'browse' ? `<div class="orb-active-line"><span><i></i>${state.mode === 'area' ? '正在框选区域' : '正在点选对象'}</span><button data-action="finish">完成标注</button></div>` : ''}
+        <div class="orb-pick-actions"><button class="btn primary" data-action="point">${icon('select')}开始标注</button><div class="orb-other-modes"><button data-action="area">${icon('area')}框选区域</button><button data-action="page">${icon('page')}整页评注</button></div></div>
+        <div class="orb-menu-links"><button data-action="notes">${icon('note')}<span>本页评注</span><b>${state.notes.length}</b>${icon('arrow')}</button><button data-action="markers" aria-pressed="${state.showMarkers}">${icon(state.showMarkers ? 'eye' : 'hide')}<span>${state.showMarkers ? '显示页面标记' : '页面标记已隐藏'}</span><i class="orb-switch ${state.showMarkers ? 'checked' : ''}"></i></button><button data-action="library">${icon('book')}<span>全部保存的网页</span>${icon('arrow')}</button></div>
+        <footer><span>可拖动贴边</span><button data-action="minimize">收起到右下角</button><button data-action="disable">关闭</button></footer>
+      </section>`;
     } else if (state.panel === 'editor' && state.draft) {
-      const d = state.draft;
-      html = `<section class="panel editor" role="dialog" aria-label="填写网页评注">${panelHead(d.note.id ? '编辑评注' : d.note.label, d.note.type === 'page' ? '整页意见 · 记录当前视口' : '留下你关注的地方和原因')}<div class="body"><textarea id="review-comment" aria-label="评注内容" placeholder="这里有什么值得关注？写下你的观察……" maxlength="12000">${esc(d.note.comment)}</textarea><div class="kinds">${Object.entries(kinds).map(([key, label]) => `<button class="kind ${d.note.kind === key ? 'selected' : ''}" data-action="kind" data-kind="${key}">${label}</button>`).join('')}</div><div class="capture-state">${icon('image')}${d.note.id ? '修改原话，保留记录时画面' : d.asset ? '已附记录时视口与关注区域' : state.busy ? '正在记录画面…' : '画面未保存'}${!d.note.id && !d.asset && !state.busy ? '<button class="link" data-action="retry">重试截图</button>' : ''}</div>${d.error ? `<div class="error">${esc(d.error)}</div>` : ''}${!d.note.id && !d.asset && !state.busy ? `<label class="capture-state"><input id="allow-text" type="checkbox" ${d.allowWithoutImage ? 'checked' : ''}>我已知缺少画面，仅保存文字</label>` : ''}<div class="editing-row"><button class="link" data-action="cancel-draft">取消本条</button><div style="display:flex;gap:7px">${!d.note.id ? '<button class="secondary" data-action="save-continue">保存并继续</button>' : ''}<button class="primary" data-action="save" ${state.busy ? 'disabled' : ''}>保存评注</button></div></div></div></section>`;
+      const d = state.draft, disabled = state.busy || !d.note.comment.trim();
+      html = `<section class="panel editor popover" role="dialog" aria-label="填写网页评注">
+        <header class="popover-head"><div class="popover-target">${icon(d.note.type === 'region' ? 'area' : d.note.type === 'page' ? 'page' : 'select')}${esc(d.note.label)}</div><button class="icon-btn" data-action="cancel-draft" aria-label="取消本次评注">${icon('close')}</button></header>
+        <textarea id="review-comment" aria-label="评注内容" placeholder="这里有什么值得关注？&#10;写下你的观察或想法……" maxlength="12000">${esc(d.note.comment)}</textarea>
+        <div class="note-kind-row">${Object.entries(kinds).map(([key, label]) => `<button class="kind kind-pill ${d.note.kind === key ? 'selected' : ''}" data-action="kind" data-kind="${key}">${label}</button>`).join('')}</div>
+        ${d.error ? `<div class="capture-error">${esc(d.error)}${!d.note.id && !d.asset && !state.busy ? '<button class="text-button" data-action="retry">重试截图</button>' : ''}</div>` : ''}
+        ${!d.note.id && !d.asset && !state.busy ? `<label class="text-only"><input id="allow-text" type="checkbox" ${d.allowWithoutImage ? 'checked' : ''}>我已知缺少画面，仅保存文字</label>` : ''}
+        <footer class="popover-footer"><span class="keyboard-hint">${icon('image')}${state.busy ? '正在记录画面…' : d.asset ? d.note.id ? '保留原画面' : '附记录时画面' : '原记录无画面'}</span><div class="editor-actions">${!d.note.id ? `<button class="text-button" data-action="save-continue" ${disabled ? 'disabled' : ''}>保存并继续</button>` : ''}<button class="btn primary small" data-action="save" ${disabled ? 'disabled' : ''}>${icon('check')}${d.note.id ? '保存修改' : '保存评注'}</button></div></footer>
+      </section>`;
     } else if (state.panel === 'notes') {
-      const missing = state.notes.filter(n => state.matches.get(n.id)?.status !== 'found').length;
-      html = `<section class="panel notes-panel" role="dialog" aria-label="本页评注">${panelHead('本页评注', `${state.notes.length} 条已保存`)}<div class="body">${missing ? `<div class="notice">${missing} 条评注的位置需要确认，原画面与意见仍保留。</div>` : ''}${state.notes.length ? state.notes.map((note, index) => { const status = state.matches.get(note.id)?.status || 'missing'; return `<article class="note"><div class="note-head"><strong>${String(index + 1).padStart(2, '0')} · ${esc(note.label)}</strong><span class="status ${status === 'found' ? '' : 'warn'}">${labels[status]}</span></div><p>${esc(note.comment)}</p><div class="note-actions"><button class="link" data-action="peek" data-id="${note.id}">原画面</button><button class="link" data-action="${status === 'found' ? 'locate' : 'rebind'}" data-id="${note.id}">${status === 'found' ? '回到位置' : '重新定位'}</button><button class="link" data-action="edit" data-id="${note.id}">编辑</button></div></article>`; }).join('') : '<div class="empty">还没有评注，留下一条自己的观察。</div>'}</div><footer class="footer"><button class="link" data-action="library">全部保存的网页</button><button class="primary" data-action="point">继续标注</button></footer></section>`;
+      const missing = state.notes.filter(note => state.matches.get(note.id)?.status !== 'found').length;
+      html = `<div class="drawer-backdrop" data-action="minimize"></div><aside class="panel notes-panel drawer" role="dialog" aria-modal="true" aria-label="本页评注">
+        <header class="drawer-head"><div><h2>本页评注</h2><p>${esc(location.hostname)} · ${state.notes.length} 条已保存</p></div><button class="icon-btn" data-action="minimize" aria-label="关闭评注面板">${icon('close')}</button></header>
+        <div class="drawer-content">${missing ? `<div class="drawer-banner">${missing} 条评注的原位置需要确认。原截图和评论仍保留。</div>` : ''}
+        ${state.notes.length ? state.notes.map((note, index) => {
+          const status = state.matches.get(note.id)?.status || 'missing';
+          return `<article class="drawer-note"><div class="drawer-note-head"><span class="note-number">${String(index + 1).padStart(2, '0')}</span><strong>${esc(note.label)}</strong>${statusMarkup(status)}</div><p>${esc(note.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${note.id}">查看原画面</button><button data-action="${status === 'found' ? 'locate' : 'rebind'}" data-id="${note.id}">${status === 'found' ? '回到网页' : '重新定位'}</button><button data-action="edit" data-id="${note.id}">编辑</button></div></article>`;
+        }).join('') : `<div class="empty-state">${icon('pen')}<strong>留下一条自己的观察</strong><p>关于内容、路径、交互，或你想参考的地方。</p></div>`}</div>
+        <footer class="drawer-footer"><button class="btn" data-action="library">${icon('book')}全部已保存网页</button><button class="btn primary" data-action="point">${icon('pen')}继续评注</button></footer>
+      </aside>`;
     } else if (state.panel === 'peek' && state.peek) {
-      const n = state.notes.find(n => n.id === state.peek.id);
-      if (n) html = `<section class="panel editor" role="dialog" aria-label="查看已保存评注">${panelHead(n.label, new Date(n.createdAt).toLocaleString())}<div class="body"><p class="saved-comment">${esc(n.comment)}</p><div class="status">${labels[state.matches.get(n.id)?.status || 'missing']}</div>${state.peek.asset?.viewport ? `<img class="snapshot" src="${state.peek.asset.viewport}" alt="记录时网页视口">` : '<p class="muted">此条记录没有画面。</p>'}<div class="editing-row"><button class="link" data-action="notes">本页全部</button><button class="secondary" data-action="edit" data-id="${n.id}">编辑评注</button></div></div></section>`;
+      const note = state.notes.find(note => note.id === state.peek.id);
+      if (note) html = `<section class="panel editor popover" role="dialog" aria-label="查看已保存评注">
+        <header class="popover-head"><div class="popover-target">${icon('note')}${esc(note.label)}</div><button class="icon-btn" data-action="close-popup" aria-label="关闭评注">${icon('close')}</button></header>
+        <div class="saved-note-body">${esc(note.comment)}</div><div class="note-snapshot">${state.peek.asset?.viewport ? `<img class="snapshot-thumb" src="${state.peek.asset.viewport}" alt="记录时网页视口">` : '<p class="muted">此条记录没有画面。</p>'}<div class="snapshot-meta"><span>记录于 ${new Date(note.createdAt).toLocaleDateString('zh-CN')}</span>${statusMarkup(state.matches.get(note.id)?.status || 'missing')}</div></div>
+        <footer class="popover-footer"><button class="btn small quiet" data-action="edit" data-id="${note.id}">编辑评注</button><button class="btn small" data-action="notes">查看本页全部 ${icon('arrow')}</button></footer>
+      </section>`;
     } else if (state.panel === 'confirm-close') {
-      html = `<section class="panel" role="dialog" aria-label="保留未保存评注">${panelHead('这条评注还没有保存')}<div class="body"><p>先保存，或者放弃这条输入后关闭。已经保存的记录不会删除。</p><div class="confirm-row"><button class="secondary" data-action="resume-draft">继续编辑</button><button class="secondary danger" data-action="discard-disable">放弃并关闭</button></div></div></section>`;
+      html = `<section class="panel confirm-panel" role="dialog" aria-label="保留未保存评注">${panelHead('这条评注还没有保存')}<div class="confirm-body"><p>先保存，或者放弃这条输入后关闭。已经保存的记录不会删除。</p><div class="confirm-row"><button class="btn small" data-action="resume-draft">继续编辑</button><button class="btn small danger" data-action="discard-disable">放弃并关闭</button></div></div></section>`;
     }
     shadow.getElementById('panel').innerHTML = html; positionWidget();
+    const rect = currentAnchor();
+    if (rect) highlight(rect, state.draft?.note.type === 'region' ? 0 : 5);
+    else if (state.mode === 'browse') highlight(null);
+    shadow.querySelectorAll('.snapshot-thumb').forEach(img => { if (!img.complete) img.addEventListener('load', () => positionWidget(), { once: true }); });
     if (focus && state.panel === 'editor') { const textarea = shadow.getElementById('review-comment'); textarea?.focus({ preventScroll: true }); textarea?.setSelectionRange(textarea.value.length, textarea.value.length); }
   }
+
   function toast(message) {
     if (!shadow) return;
     clearTimeout(toastTimer); shadow.getElementById('notifications').innerHTML = `<div class="toast" role="status">${esc(message)}</div>`;
     toastTimer = setTimeout(() => { shadow?.getElementById('notifications').replaceChildren(); }, 4500);
   }
-  function highlight(rect) {
+  function highlight(rect, offset = 5) {
     if (!shadow) return;
     shadow.querySelector('.highlight')?.remove();
     if (!rect) return;
-    const box = document.createElement('div'); box.className = 'highlight'; Object.assign(box.style, { left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' }); shadow.getElementById('selection').append(box);
+    const box = document.createElement('div'); box.className = 'highlight'; Object.assign(box.style, { left: (rect.left - offset) + 'px', top: (rect.top - offset) + 'px', width: (rect.width + offset * 2) + 'px', height: (rect.height + offset * 2) + 'px' }); shadow.getElementById('selection').append(box);
   }
   async function collapse() {
     state.panel = null; state.mode = 'browse'; state.hover = null; state.rebind = null; highlight(null);
@@ -311,11 +384,13 @@
         case 'save': await save(false); break;
         case 'save-continue': await save(true); break;
         case 'cancel-draft': operation++; state.draft = null; state.panel = null; renderPanel(); break;
+        case 'close-popup': state.peek = null; state.panel = null; renderPanel(); break;
         case 'peek': await peek(button.dataset.id); break;
         case 'locate': locate(button.dataset.id); break;
         case 'edit': {
           const note = state.notes.find(n => n.id === button.dataset.id); if (!note) break;
-          state.draft = { note: { ...note }, asset: await send('GET_ASSET', { id: note.id }) }; state.panel = 'editor'; renderPanel(true); break;
+          const match = state.matches.get(note.id);
+          state.draft = { note: { ...note }, asset: await send('GET_ASSET', { id: note.id }), target: match?.element || null, rect: match?.status === 'found' ? markRect(note, match) : null }; state.panel = 'editor'; renderPanel(true); break;
         }
         case 'rebind': state.rebind = button.dataset.id; enter('point'); break;
       }
@@ -335,19 +410,20 @@
     if (drag) {
       const dx = event.clientX - drag.startX, dy = event.clientY - drag.startY;
       if (Math.hypot(dx, dy) < 5 && !drag.moved) return;
-      drag.moved = true; state.panel = null; shadow.getElementById('panel').replaceChildren(); positionWidget({ x: drag.x + dx, y: drag.y + dy }); return;
+      drag.moved = true; drag.el.classList.add('is-dragging'); drag.el.setAttribute('aria-expanded', 'false'); state.panel = null; shadow.getElementById('panel').replaceChildren(); positionWidget({ x: drag.x + dx, y: drag.y + dy }); return;
     }
     if (regionDrag) {
-      highlight({ left: Math.min(regionDrag.x, event.clientX), top: Math.min(regionDrag.y, event.clientY), width: Math.abs(event.clientX - regionDrag.x), height: Math.abs(event.clientY - regionDrag.y) }); return;
+      highlight({ left: Math.min(regionDrag.x, event.clientX), top: Math.min(regionDrag.y, event.clientY), width: Math.abs(event.clientX - regionDrag.x), height: Math.abs(event.clientY - regionDrag.y) }, 0); return;
     }
     if (own(event) || state.mode !== 'point' || state.draft || state.busy) return;
     const target = selectedTarget(event.target); if (target && target !== state.hover) { state.hover = target; highlight(target.getBoundingClientRect()); }
   }
-  function cancelPointer() { drag = null; regionDrag = null; highlight(null); positionWidget(); }
+  function cancelPointer() { drag?.el.classList.remove('is-dragging'); drag = null; regionDrag = null; highlight(null); positionWidget(); }
   function pointerUp(event) {
     if (drag) {
+      drag.el.classList.remove('is-dragging');
       if (drag.moved) {
-        const r = shadow.querySelector('.orb-wrap').getBoundingClientRect(); state.dock = { side: r.left + 24 < innerWidth / 2 ? 'left' : 'right', bottom: Math.max(16, innerHeight - r.bottom) };
+        const r = shadow.querySelector('.orb-wrap').getBoundingClientRect(); state.dock = { side: r.left + 22 < innerWidth / 2 ? 'left' : 'right', bottom: Math.max(16, innerHeight - r.bottom) };
         suppressClick = performance.now() + 400; send('SAVE_DOCK', { dock: state.dock }).catch(error => toast(error.message));
       }
       drag = null; positionWidget(); return;

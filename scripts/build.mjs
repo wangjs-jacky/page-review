@@ -7,9 +7,11 @@ import { createHash } from 'node:crypto';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url), Core = require('../extension/core.js');
 const manifest = JSON.parse(await fs.readFile(path.join(root, 'extension/manifest.json'), 'utf8'));
-const files = ['manifest.json', 'core.js', 'db.js', 'background.js', 'content-style.js', 'content.js', 'library.html', 'library.css', 'library.js'];
+const files = ['manifest.json', 'core.js', 'db.js', 'background.js', 'content.js', 'library.html', 'library.css', 'library.js'];
 const output = path.join(root, 'dist/page-review'); await fs.mkdir(output, { recursive: true });
 for (const file of files) await fs.copyFile(path.join(root, 'extension', file), path.join(output, file));
+await fs.writeFile(path.join(output, 'content-style.js'), 'globalThis.PageReviewStyles = ' + JSON.stringify(await fs.readFile(path.join(root, 'extension/content.css'), 'utf8')) + ';\n');
+files.push('content-style.js');
 function pngChunk(type, data) {
   const name = Buffer.from(type), size = Buffer.alloc(4), crc = Buffer.alloc(4); size.writeUInt32BE(data.length); crc.writeUInt32BE(Core.crc32(Buffer.concat([name, data])));
   return Buffer.concat([size, name, data, crc]);

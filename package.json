@@ -1,6 +1,6 @@
 {
   "name": "page-review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "在正常浏览中评注网页，保存画面与关注点，整理给 AI 阅读。",
   "scripts": {
@@ -8,5 +8,7 @@
     "test": "node --test tests/*.test.cjs",
     "build": "node scripts/build.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

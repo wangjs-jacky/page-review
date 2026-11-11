@@ -112,6 +112,12 @@
     files.unshift({ name: 'README.md', data: text }, { name: 'manifest.json', data: JSON.stringify(manifest, null, 2) });
     return { manifest, markdown: text, bytes: zip(files) };
   }
-  const api = { normalize, pageKey, similarity, anchorScore, rankAnchors, safeNote, crc32, zip, dataBytes, readingPackage };
+  function placePopover(rect, viewport, panel = {}) {
+    const width = Math.min(panel.width || 360, viewport.width - 30), height = Math.min(panel.height || 260, viewport.height - 30);
+    const x = rect ? rect.left + Math.min(rect.width * 0.2, 100) : viewport.width / 2 - width / 2;
+    const y = rect ? rect.top + rect.height + 16 : 180;
+    return { left: Math.max(15, Math.min(x, viewport.width - width - 15)), top: Math.max(15, Math.min(y, viewport.height - Math.max(300, height + 15))) };
+  }
+  const api = { normalize, pageKey, similarity, anchorScore, rankAnchors, safeNote, crc32, zip, dataBytes, readingPackage, placePopover };
   root.PageReviewCore = api; if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

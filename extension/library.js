@@ -2,8 +2,10 @@
   'use strict';
   const Core = PageReviewCore, app = document.getElementById('app'), dialog = document.getElementById('detail-dialog');
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const state = { notes: [], selected: new Set(), view: 'library', query: '', filter: 'all', task: '', detail: null, editing: null, deleting: null, busy: false };
-  const assets = new Map(); let renderId = 0, toastTimer;
+  const icons = { note: '<path d="M4 3h16v14l-4 4H4Zm12 14v4M8 8h8M8 12h6"/>', check: '<path d="m5 12 4 4L19 6"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>', arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>', back: '<path d="M19 12H5m5-5-5 5 5 5"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>', download: '<path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/>', copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>', pin: '<path d="M19 10c0 5-7 11-7 11s-7-6-7-11a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>', page: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a19 19 0 0 0 0 18 19 19 0 0 0 0-18Z"/>' };
+  const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.note}</svg>`;
+  const state = { notes: [], selected: new Set(), view: 'library', query: '', filter: 'all', task: '', detail: null, editing: null, deleting: null, busy: false, preview: null };
+  const assets = new Map(); let toastTimer;
   const statusLabels = { found: '最近可定位', uncertain: '位置待确认', missing: '原位置失效', changed: '页面已明显变化' };
   const outcomes = { pending: '未决定', adopted: '已采纳', rejected: '不采用' };
   async function send(type, payload = {}) {
@@ -25,47 +27,72 @@
   }
   const selectedNotes = () => state.notes.filter(note => state.selected.has(note.id));
   function selectionText() { const notes = selectedNotes(); return `已选 <strong>${new Set(notes.map(n => n.pageId)).size}</strong> 个网页，<strong>${notes.length}</strong> 条评注`; }
-  function footer() { return `<div class="selection-footer"><span>${selectionText()}</span><button class="link-button" data-action="clear">清空选择</button><span class="spacer"></span><button class="button primary" data-action="ai" ${state.selected.size ? '' : 'disabled'}>准备给 AI →</button></div>`; }
+  function footer() {
+    return `<div class="selection-footer collection-footer"><span class="selection-count">${selectionText()}</span><button class="link-button text-button" data-action="clear">清空选择</button><button class="button btn primary" data-action="ai" ${state.selected.size ? '' : 'disabled'}>准备给 AI ${icon('arrow')}</button></div>`;
+  }
+  function statusMarkup(note) {
+    const found = note.locationStatus === 'found';
+    return `<span class="status-label ${found ? '' : 'warning'}">${icon('pin')}${statusLabels[note.locationStatus] || '尚未检查'}</span>`;
+  }
   function card(group) {
-    const chosen = group.notes.every(note => state.selected.has(note.id)), missing = group.notes.filter(note => note.locationStatus !== 'found').length;
-    return `<article class="card ${chosen ? 'chosen' : ''}"><div class="card-image" data-thumbnail="${group.notes.find(n => n.hasImage)?.id || ''}"><span class="placeholder">↗</span></div><input class="card-select" type="checkbox" aria-label="选择 ${esc(group.title || new URL(group.url).hostname)} 的全部评注" data-page-select="${esc(group.id)}" ${chosen ? 'checked' : ''}><button class="card-body" data-action="detail" data-page="${esc(group.id)}"><div class="source">${esc(new URL(group.url).hostname)}</div><h3>${esc(group.title || group.url)}</h3><p class="excerpt">${esc(group.notes[0].comment)}</p><div class="card-meta"><span>${group.notes.length} 条评注</span><span class="${missing ? 'warning' : ''}">${missing ? `${missing} 条位置待确认` : '可原页回看'}</span></div></button></article>`;
+    const chosen = group.notes.every(note => state.selected.has(note.id)), missing = group.notes.filter(note => note.locationStatus !== 'found').length, host = new URL(group.url).hostname;
+    return `<article class="card page-card ${chosen ? 'chosen selected' : ''}"><div class="card-image card-art" data-thumbnail="${group.notes.find(note => note.hasImage)?.id || ''}"><span class="placeholder">↗</span></div><label class="card-select"><input type="checkbox" aria-label="选择 ${esc(group.title || host)} 的全部评注" data-page-select="${esc(group.id)}" ${chosen ? 'checked' : ''}>${icon('check')}</label><button class="card-body" data-action="detail" data-page="${esc(group.id)}"><div class="source card-source"><span class="favicon">${esc(host[0].toLowerCase())}</span>${esc(host)}</div><h2>${esc(group.title || group.url)}</h2><p class="excerpt card-excerpt">${esc(group.notes[0].comment)}</p><div class="card-meta card-foot"><span>${group.notes.length} 条评注</span>${missing ? `<span class="warning">${missing} 条位置待确认</span>` : `<span>${icon('pin')} 可原页回看</span>`}</div></button></article>`;
   }
   function renderLibrary() {
-    const groups = visibleGroups(), total = groupNotes().length, attention = state.notes.filter(n => n.locationStatus !== 'found').length;
-    app.innerHTML = `<header class="page-head"><div><h1>保存的网页</h1><p class="lead">把关注的地方留下来，等需要时一起交给 AI。</p></div><input class="search" id="search" type="search" aria-label="搜索网页或评注" placeholder="搜索标题、网站或评注内容" value="${esc(state.query)}"></header><div class="tools"><div class="filters"><button class="filter ${state.filter === 'all' ? 'active' : ''}" data-action="filter" data-filter="all">全部网页 <span class="count-tag">${total}</span></button><button class="filter ${state.filter === 'attention' ? 'active' : ''}" data-action="filter" data-filter="attention">位置待确认 <span class="count-tag">${attention}</span></button></div><button class="link-button" data-action="select-visible">选择当前结果</button></div>${state.notes.length ? `<div class="grid">${groups.map(card).join('')}</div>${!groups.length ? '<div id="search-empty" class="empty">没有匹配的网页或评注。</div>' : ''}` : '<div class="empty"><h2>从正常浏览的网页开始</h2><p>点击 Chrome 工具栏中的 Page Review 图标启用，在网页右下角的小球中选择标注。保存的评注会出现在这里。</p><p>评论与画面保存在当前浏览器，不会自动上传。</p></div>'}${footer()}`;
+    const groups = visibleGroups(), total = groupNotes().length, attention = state.notes.filter(note => note.locationStatus !== 'found').length;
+    app.className = 'library-shell';
+    app.innerHTML = `<div class="library-top"><span class="mini-logo">${icon('note')}</span>网页评注 <span>／</span> 保存在这个浏览器</div>
+      <header class="page-head library-header"><div><h1>保存的网页</h1><p>把关注的地方留下来，等需要时一起交给 AI。</p></div><label class="search-field">${icon('search')}<input class="search" id="search" type="search" aria-label="搜索网页或评注" placeholder="搜索标题、网站或评注内容" value="${esc(state.query)}"></label></header>
+      <div class="tools library-tools"><div class="filters filter-tabs"><button class="filter ${state.filter === 'all' ? 'active' : ''}" data-action="filter" data-filter="all">全部网页 <span class="tiny-count">${total}</span></button><button class="filter ${state.filter === 'attention' ? 'active' : ''}" data-action="filter" data-filter="attention">位置待确认 <span class="tiny-count">${attention}</span></button></div><button class="link-button text-button" data-action="select-visible">选择当前结果</button></div>
+      ${state.notes.length ? `<div class="grid library-grid">${groups.map(card).join('')}</div>${!groups.length ? '<div id="search-empty" class="empty-state">没有匹配的网页或评注。</div>' : ''}<p class="library-note">点开网页卡片可查看原评注，也可以只选其中几条。</p>` : `<div class="empty-state library-empty">${icon('note')}<strong>从正常浏览的网页开始</strong><p>点击 Chrome 工具栏图标启用，从网页右下角的小球开始标注。<br>保存的评注和画面会出现在这里。</p></div>`}${footer()}`;
     loadImages(app);
   }
   function readingNote(note) {
-    const outcome = note.outcome;
-    return `<article class="reading-note"><h4>${esc(note.id.slice(0, 8).toUpperCase())} · ${esc(note.label)} · ${statusLabels[note.locationStatus] || '尚未检查'}</h4><p>${esc(note.comment)}</p>${note.anchor?.text ? `<details><summary class="small">当时选中的网页内容</summary><blockquote>${esc(note.anchor.text)}</blockquote></details>` : ''}${note.hasImage ? `<img class="snapshot" data-image="${note.id}" alt="记录时画面"><div class="snapshot-caption">记录时视口 · ${new Date(note.capturedAt || note.createdAt).toLocaleString()}</div>` : `<p class="small">此条没有保存画面：${esc(note.screenshotError || '仅文字评注')}</p>`}${outcome && outcome.status !== 'pending' ? `<p class="outcome">后续结果：${outcomes[outcome.status]}${outcome.reason ? ` · ${esc(outcome.reason)}` : ''}</p>` : ''}</article>`;
+    const outcome = note.outcome, kind = { observation: '观察', like: '优点', problem: '问题' }[note.kind] || '观察';
+    return `<article class="reading-note document-note"><header class="document-note-header"><span>${esc(note.id.slice(0, 8).toUpperCase())} · ${esc(note.label)}</span>${statusMarkup(note)}</header><p>“${esc(note.comment)}”</p>${note.hasImage ? `<img class="snapshot" data-image="${note.id}" alt="记录时画面"><div class="snapshot-caption snapshot-meta"><span>记录时画面 · ${new Date(note.capturedAt || note.createdAt).toLocaleDateString('zh-CN')}</span><span>${kind}</span></div>` : `<p class="small">此条没有保存画面：${esc(note.screenshotError || '仅文字评注')}</p>`}${note.anchor?.text ? `<details class="note-source"><summary>当时选中的网页内容</summary><blockquote>${esc(note.anchor.text)}</blockquote></details>` : ''}${outcome && outcome.status !== 'pending' ? `<p class="reading-outcome">后续结果：${outcomes[outcome.status]}${outcome.reason ? ` · ${esc(outcome.reason)}` : ''}</p>` : ''}</article>`;
   }
   function renderAI() {
     const notes = selectedNotes(), pageIds = new Set(notes.map(note => note.pageId));
-    app.innerHTML = `<button class="link-button back" data-action="library">← 返回选择网页</button><header class="page-head"><div><h1>把关注点，一起交给 AI</h1><p class="lead">你的原始评注、来源和对应画面会放在一起。</p></div></header><div class="ai-grid"><aside class="task-card"><label for="ai-task">这次希望 AI 做什么？</label><textarea id="ai-task" placeholder="例如：比较这些网页的内容组织，给我的内容页一些建议。">${esc(state.task)}</textarea><div class="summary"><div><span>选中的网页</span><strong>${pageIds.size} 个</strong></div><div><span>原始评注</span><strong>${notes.length} 条</strong></div><div><span>附有画面</span><strong>${notes.filter(n => n.hasImage).length} 条</strong></div><div><span>位置需要确认</span><strong>${notes.filter(n => n.locationStatus !== 'found').length} 条</strong></div></div><button class="button primary" data-action="download" ${notes.length ? '' : 'disabled'}>下载 AI 阅读包</button><button class="button" data-action="copy" ${notes.length ? '' : 'disabled'}>复制阅读说明</button><p class="fine">阅读包含 Markdown、JSON 与原始图片。将 ZIP 解压到 Agent 可读取的目录，或把材料作为附件交给 AI。复制文字不会自动附上图片。</p></aside><section class="paper"><header class="paper-head"><span>AI 阅读材料预览</span><span>${pageIds.size} 个来源 · ${notes.length} 条评注</span></header><div class="paper-body"><div class="paper-kicker">MY WEB ANNOTATIONS</div><h2>围绕我关注的地方阅读</h2><p class="task-text" id="task-preview">${esc(state.task || '请阅读下列原始评注和对应画面。')}</p>${groupNotes().filter(group => pageIds.has(group.id)).map(group => `<section class="reading-page"><h3>${esc(group.title || group.url)}</h3><div class="source">${esc(group.url)}</div>${group.notes.filter(note => state.selected.has(note.id)).map(readingNote).join('')}</section>`).join('')}</div></section></div>`;
+    app.className = 'ai-shell';
+    app.innerHTML = `<button class="link-button back back-link" data-action="library">${icon('back')}返回选择网页</button>
+      <header class="ai-top"><h1>把关注点，一起交给 AI</h1><p>先说这次想做什么，再带上你的原始评注和对应画面。</p></header>
+      <div class="ai-grid ai-layout"><aside class="task-card ai-settings"><label class="field-label" for="ai-task">这次希望 AI 做什么？</label><textarea id="ai-task" placeholder="例如：比较这些网站的资料查找路径，给我的内容页一些建议。">${esc(state.task)}</textarea><div class="task-examples"><button data-action="task-example" data-example="compare">比较设计取舍</button><button data-action="task-example" data-example="apply">结合我的项目</button></div><div class="summary ai-summary"><div class="summary-line"><span>选中的网页</span><strong>${pageIds.size} 个</strong></div><div class="summary-line"><span>原始评注</span><strong>${notes.length} 条</strong></div><div class="summary-line"><span>附有画面</span><strong>${notes.filter(note => note.hasImage).length} 条</strong></div><div class="summary-line"><span>位置需要确认</span><strong>${notes.filter(note => note.locationStatus !== 'found').length} 条</strong></div></div><div class="ai-actions"><button class="button btn primary" data-action="download" ${notes.length ? '' : 'disabled'}>${icon('download')}下载阅读包</button><button class="button btn" data-action="copy" ${notes.length ? '' : 'disabled'}>${icon('copy')}复制阅读说明</button></div><p class="fine ai-note">阅读包包含原评注、来源与对应图片。复制说明后，仍需把图片随材料交给 AI。</p></aside>
+      <section class="paper reading-document"><header class="paper-head document-top"><span>${icon('note')} AI 阅读材料预览</span><span>${pageIds.size} 个来源 · ${notes.length} 条评注</span></header><div class="paper-body document-body"><div class="paper-kicker eyebrow">MY WEB ANNOTATIONS</div><h2>围绕我关注的地方阅读</h2><p class="task-text document-task" id="task-preview">${esc(state.task || '请先填写这次希望 AI 做什么。')}</p>${groupNotes().filter(group => pageIds.has(group.id)).map((group, index) => `<section class="reading-page document-page"><h3>${String(index + 1).padStart(2, '0')} ／ ${esc(group.title || group.url)}</h3><div class="source document-page-url">${esc(group.url)}</div>${group.notes.filter(note => state.selected.has(note.id)).map(readingNote).join('')}</section>`).join('')}<div class="document-foot">请区分我的原始评注和你的推断，并用评注编号引用依据。位置失效的内容只代表记录时状态；必要时再核对当前网页。</div></div></section></div>`;
     loadImages(app);
   }
+
   async function loadImages(root) {
-    const version = renderId;
     for (const el of root.querySelectorAll('[data-image],[data-thumbnail]')) {
       const id = el.dataset.image || el.dataset.thumbnail; if (!id) continue;
       asset(id).then(image => {
-        if (version !== renderId || !el.isConnected || !image?.viewport) return;
+        if (!el.isConnected || !image?.viewport) return;
         if (el.matches('img')) el.src = image.viewport;
         else { const img = document.createElement('img'); img.src = image.viewport; img.alt = '记录时网页画面'; el.replaceChildren(img); }
       }).catch(error => { if (el.isConnected) el.setAttribute('title', error.message); });
     }
   }
-  function render() { renderId++; if (state.view === 'ai') renderAI(); else renderLibrary(); }
+  function render() { if (state.view === 'ai') renderAI(); else renderLibrary(); }
   async function reload() {
     state.notes = await send('LIST');
     const existing = new Set(state.notes.map(note => note.id)); state.selected = new Set([...state.selected].filter(id => existing.has(id)));
     render();
   }
   function renderDetail() {
-    const group = groupNotes().find(group => group.id === state.detail); if (!group) { dialog.close(); return; }
-    dialog.innerHTML = `<header class="detail-heading"><div><div class="source">${esc(new URL(group.url).hostname)}</div><h2>${esc(group.title || group.url)}</h2><p>勾选想交给 AI 的评注，可保留同页其他内容。</p></div><button class="close" data-action="close-detail" aria-label="关闭详情">×</button></header>${group.notes.map(note => `<article class="detail-note" data-detail-note="${note.id}"><div class="detail-title"><label><input type="checkbox" data-note-select="${note.id}" ${state.selected.has(note.id) ? 'checked' : ''}>${esc(note.label)}</label><span class="small ${note.locationStatus === 'found' ? '' : 'warning'}">${statusLabels[note.locationStatus] || '尚未检查'}</span></div>${state.editing === note.id ? `<textarea data-edit-comment="${note.id}" aria-label="编辑评注内容" maxlength="12000">${esc(note.comment)}</textarea><div class="edit-actions"><button class="button" data-action="cancel-edit">取消编辑</button><button class="button primary" data-action="save-edit" data-id="${note.id}">保存修改</button></div>` : `<p class="note-text">${esc(note.comment)}</p>`}${note.hasImage ? `<img class="snapshot" data-image="${note.id}" alt="记录时网页视口">` : '<p class="small">这条评注没有保存画面。</p>'}<div class="actions"><button class="link-button" data-action="open" data-id="${note.id}">打开原网页并定位</button><button class="link-button" data-action="edit" data-id="${note.id}">编辑原话</button><button class="link-button warning" data-action="delete" data-id="${note.id}">删除</button></div><details class="outcome-editor"><summary>记录后续结果${note.outcome && note.outcome.status !== 'pending' ? ` · ${outcomes[note.outcome.status]}` : ''}</summary><select data-outcome="${note.id}" aria-label="采纳结果">${Object.entries(outcomes).map(([key, label]) => `<option value="${key}" ${key === (note.outcome?.status || 'pending') ? 'selected' : ''}>${label}</option>`).join('')}</select><textarea data-reason="${note.id}" aria-label="采纳或不采用的理由" placeholder="为什么采纳或不采用？有什么适用条件？" maxlength="4000">${esc(note.outcome?.reason || '')}</textarea><button class="link-button" data-action="save-outcome" data-id="${note.id}">保存结果</button></details>${note.history?.length ? `<details class="history"><summary>查看修改前的原话（${note.history.length}次）</summary>${note.history.map(item => `<p>${esc(item.comment)}<br><small>${new Date(item.at).toLocaleString()}</small></p>`).join('')}</details>` : ''}</article>`).join('')}<footer class="dialog-actions"><span class="small">${selectionText()}</span><button class="button primary" data-action="detail-ai" ${state.selected.size ? '' : 'disabled'}>准备给 AI →</button></footer>`;
+    const group = groupNotes().find(group => group.id === state.detail);
+    if (!group) { dialog.close(); return; }
+    const scrollTop = dialog.querySelector('.drawer-content')?.scrollTop || 0, hero = group.notes.find(note => note.hasImage);
+    dialog.innerHTML = `<header class="drawer-head"><div class="dialog-heading-title"><h2>${esc(group.title || new URL(group.url).hostname)}</h2><p>${esc(new URL(group.url).hostname)} · ${group.notes.length} 条已保存</p></div><button class="icon-btn" data-action="close-detail" aria-label="关闭详情">${icon('close')}</button></header><div class="selected-counter">勾选想交给 AI 的评注，可保留同页其他内容。</div>
+      <div class="drawer-content">${hero ? `<div class="detail-hero"><img data-image="${hero.id}" alt="记录时网页画面"></div>` : ''}${group.notes.map((note, index) => `<article class="detail-note drawer-note" data-detail-note="${note.id}"><div class="note-select-line"><input type="checkbox" aria-label="选择评注 ${esc(note.label)}" data-note-select="${note.id}" ${state.selected.has(note.id) ? 'checked' : ''}><div><div class="detail-title drawer-note-head"><span class="note-number">${String(index + 1).padStart(2, '0')}</span><strong>${esc(note.label)}</strong>${statusMarkup(note)}</div>
+        ${state.editing === note.id ? `<textarea class="edit-comment" data-edit-comment="${note.id}" aria-label="编辑评注内容" maxlength="12000">${esc(note.comment)}</textarea><div class="edit-actions"><button class="button btn small" data-action="cancel-edit">取消编辑</button><button class="button btn primary small" data-action="save-edit" data-id="${note.id}">保存修改</button></div>` : `<p class="note-text">${esc(note.comment)}</p>`}
+        <div class="actions drawer-note-actions"><button data-action="preview" data-id="${note.id}">查看原画面</button><button data-action="open" data-id="${note.id}">回到网页</button><button data-action="edit" data-id="${note.id}">编辑</button><button data-action="delete" data-id="${note.id}">删除</button></div>
+        ${state.preview === note.id ? `<div class="note-preview">${note.hasImage ? `<img data-image="${note.id}" alt="该条评注记录时的网页视口">` : '<p class="small">这条记录没有保存画面。</p>'}</div>` : ''}
+        <details class="outcome-editor"><summary>记录后续结果${note.outcome && note.outcome.status !== 'pending' ? ` · ${outcomes[note.outcome.status]}` : ''}</summary><select data-outcome="${note.id}" aria-label="采纳结果">${Object.entries(outcomes).map(([key, label]) => `<option value="${key}" ${key === (note.outcome?.status || 'pending') ? 'selected' : ''}>${label}</option>`).join('')}</select><textarea data-reason="${note.id}" aria-label="采纳或不采用的理由" placeholder="为什么采纳或不采用？有什么适用条件？" maxlength="4000">${esc(note.outcome?.reason || '')}</textarea><button class="text-button" data-action="save-outcome" data-id="${note.id}">保存结果</button></details>
+        ${note.history?.length ? `<details class="history"><summary>查看修改前的原话（${note.history.length}次）</summary>${note.history.map(item => `<p>${esc(item.comment)}<br><small>${new Date(item.at).toLocaleString()}</small></p>`).join('')}</details>` : ''}</div></div></article>`).join('')}</div>
+      <footer class="dialog-actions drawer-footer"><button class="button btn" data-action="open" data-id="${group.notes[0].id}">${icon('page')}打开原网页</button><button class="button btn primary" data-action="detail-ai" ${state.selected.size ? '' : 'disabled'}>准备给 AI ${icon('arrow')}</button></footer>`;
+    dialog.querySelector('.drawer-content').scrollTop = scrollTop;
     loadImages(dialog);
   }
+
   function toast(message) { clearTimeout(toastTimer); const node = document.getElementById('toast'); node.textContent = message; node.classList.add('visible'); toastTimer = setTimeout(() => node.classList.remove('visible'), 4500); }
   async function packageSelected() {
     const notes = selectedNotes(), images = {};
@@ -83,7 +110,7 @@
       if (grid) {
         const groups = visibleGroups(); grid.innerHTML = groups.map(card).join('');
         let empty = document.getElementById('search-empty');
-        if (!groups.length && !empty) { empty = document.createElement('div'); empty.id = 'search-empty'; empty.className = 'empty'; empty.textContent = '没有匹配的网页或评注。'; grid.after(empty); }
+        if (!groups.length && !empty) { empty = document.createElement('div'); empty.id = 'search-empty'; empty.className = 'empty-state'; empty.textContent = '没有匹配的网页或评注。'; grid.after(empty); }
         if (groups.length) empty?.remove();
         loadImages(grid);
       }
@@ -100,7 +127,7 @@
       event.target.checked ? state.selected.add(event.target.dataset.noteSelect) : state.selected.delete(event.target.dataset.noteSelect);
       render();
       const footer = dialog.querySelector('.dialog-actions');
-      if (footer) { footer.querySelector('.small').innerHTML = selectionText(); footer.querySelector('[data-action="detail-ai"]').disabled = !state.selected.size; }
+      if (footer) footer.querySelector('[data-action="detail-ai"]').disabled = !state.selected.size;
     }
   });
   document.addEventListener('click', async event => {
@@ -113,10 +140,15 @@
         case 'clear': state.selected.clear(); render(); break;
         case 'ai': state.view = 'ai'; render(); window.scrollTo(0, 0); break;
         case 'library': state.view = 'library'; render(); window.scrollTo(0, 0); break;
-        case 'detail': state.detail = button.dataset.page; state.editing = null; renderDetail(); dialog.showModal(); break;
+        case 'detail': state.detail = button.dataset.page; state.editing = null; state.preview = null; renderDetail(); dialog.showModal(); break;
         case 'close-detail': if (state.editing) { toast('先保存修改或取消编辑'); break; } dialog.close(); break;
         case 'detail-ai': if (state.editing) { toast('先保存修改或取消编辑'); break; } dialog.close(); state.view = 'ai'; render(); break;
         case 'open': await send('OPEN_NOTE', { id }); break;
+        case 'preview': if (state.editing) { toast('先保存修改或取消编辑'); break; } state.preview = state.preview === id ? null : id; renderDetail(); break;
+        case 'task-example': {
+          state.task = button.dataset.example === 'compare' ? '比较这些网页如何组织内容、帮助用户查找资料，以及用交互解释信息。请围绕我的评注分析，引用具体编号，说明各自的取舍。' : '我在设计一个有较多内容和资料的个人网站。请依据我标出的这些做法，给出导航、内容层级和解释性互动的建议，并说明哪些情境不适用。';
+          document.getElementById('ai-task').value = state.task; document.getElementById('task-preview').textContent = state.task; await chrome.storage.local.set({ readingTask: state.task }); break;
+        }
         case 'edit': if (state.editing && state.editing !== id) { toast('先保存当前修改'); break; } state.editing = id; renderDetail(); dialog.querySelector('[data-edit-comment]')?.focus(); break;
         case 'cancel-edit': state.editing = null; renderDetail(); break;
         case 'save-edit': {
@@ -138,7 +170,7 @@
         }
       }
     } catch (error) { toast(error.message); }
-    finally { if (state.busy) { state.busy = false; button.disabled = false; if (action === 'download') button.textContent = '下载 AI 阅读包'; } }
+    finally { if (state.busy) { state.busy = false; button.disabled = false; if (action === 'download') button.innerHTML = `${icon('download')}下载阅读包`; } }
   });
   dialog.addEventListener('cancel', event => { if (state.editing) { event.preventDefault(); toast('先保存修改或取消编辑'); } });
   document.getElementById('cancel-delete').addEventListener('click', () => document.getElementById('delete-dialog').close());

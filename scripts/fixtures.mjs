@@ -14,6 +14,7 @@ function page(url) {
 const server = http.createServer(async (request, response) => {
   try {
     const name = new URL(request.url, 'http://localhost').pathname;
+    if (name === '/content-style.js') { response.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' }); response.end('globalThis.PageReviewStyles = ' + JSON.stringify(await fs.readFile(path.join(project, 'extension/content.css'), 'utf8')) + ';'); return; }
     if (name === '/__test/bridge.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(await fs.readFile(path.join(project, 'tests/browser/bridge.js'))); return; }
     if (['/core.js', '/db.js', '/background.js', '/content-style.js', '/content.js', '/library.js', '/library.css'].includes(name)) {
       response.writeHead(200, { 'content-type': name.endsWith('.css') ? 'text/css' : 'text/javascript', 'cache-control': 'no-store' }); response.end(await fs.readFile(path.join(project, 'extension', name.slice(1)))); return;
@@ -23,5 +24,7 @@ const server = http.createServer(async (request, response) => {
     else response.end(page(request.url).replace('<nav>', prelude + content + '<nav>'));
   } catch (error) { response.writeHead(500); response.end(error.message); }
 });
-server.listen(8794, '127.0.0.1', () => console.log('Page Review验收页：http://127.0.0.1:8794/reading'));
+const portArg = process.argv.indexOf('--port'), port = portArg < 0 ? 8794 : Number(process.argv[portArg + 1]);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('测试端口无效');
+server.listen(port, '127.0.0.1', () => console.log(`Page Review验收页：http://127.0.0.1:${port}/reading`));
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close());
