@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>保存的网页 · Page Review</title>
+  <link rel="stylesheet" href="library.css">
+  <script src="core.js" defer></script>
+  <script src="library.js" defer></script>
+</head>
+<body>
+  <header class="app-header"><a class="brand" href="#"><span class="brand-icon">↗</span>网页评注 <small>Page Review</small></a><span class="local-label">仅保存在当前浏览器</span></header>
+  <main id="app"><div class="empty">正在读取保存的网页…</div></main>
+  <dialog id="detail-dialog" aria-label="网页评注详情"></dialog>
+  <dialog id="delete-dialog" aria-label="删除评注"><h2>删除这条评注？</h2><p>评论和对应画面会从本机保存库删除。已经导出的材料不受影响。</p><div class="dialog-actions"><button class="button" id="cancel-delete">保留</button><button class="button danger" id="confirm-delete">删除评注</button></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

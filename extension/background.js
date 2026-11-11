@@ -1,0 +1,162 @@
+'use strict';
+importScripts('core.js', 'db.js');
+const Core = PageReviewCore, DB = PageReviewDB, SCRIPT_ID = 'page-review-pages';
+const SCRIPT_FILES = ['core.js', 'content-style.js', 'content.js'];
+let actionQueue = Promise.resolve(), registrationQueue = Promise.resolve();
+const captures = new Map();
+const settings = () => chrome.storage.local.get({ enabled: false, dock: { side: 'right', bottom: 24 } });
+const librarySender = sender => sender.id === chrome.runtime.id && sender.url?.split(/[?#]/)[0] === chrome.runtime.getURL('library.html');
+function pageSender(sender) {
+  if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !sender.tab?.id || !/^https?:\/\//.test(sender.url || '')) throw new Error('此页面不能调用网页评注');
+  return Core.pageKey(sender.url);
+}
+function reconcile() {
+  const next = registrationQueue.catch(() => {}).then(async () => {
+    const state = await settings(), allowed = await chrome.permissions.contains({ origins: ['<all_urls>'] });
+    const enabled = state.enabled && allowed;
+    const scripts = await chrome.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] });
+    if (enabled && !scripts.length) await chrome.scripting.registerContentScripts([{ id: SCRIPT_ID, js: SCRIPT_FILES, matches: ['http://*/*', 'https://*/*'], runAt: 'document_idle', allFrames: false, persistAcrossSessions: true }]);
+    if (!enabled && scripts.length) await chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
+    if (state.enabled && !allowed) await chrome.storage.local.set({ enabled: false });
+    await chrome.action.setBadgeBackgroundColor({ color: '#2864ef' });
+    await chrome.action.setBadgeText({ text: enabled ? 'ON' : '' });
+    await chrome.action.setTitle({ title: enabled ? '关闭网页评注' : '启用网页评注' });
+    return enabled;
+  });
+  registrationQueue = next; return next;
+}
+async function setEnabled(enabled) {
+  await chrome.storage.local.set({ enabled: Boolean(enabled) });
+  await reconcile();
+  return settings();
+}
+chrome.action.onClicked.addListener(tab => {
+  actionQueue = actionQueue.catch(() => {}).then(async () => {
+    const state = await settings(); await setEnabled(!state.enabled);
+    if (!state.enabled && tab.id && /^https?:\/\//.test(tab.url || '')) {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: SCRIPT_FILES });
+    }
+    if (!state.enabled && !/^https?:\/\//.test(tab.url || '')) await chrome.action.setTitle({ title: '已启用；请在普通 HTTP/HTTPS 网页上使用' });
+  }).catch(error => chrome.action.setTitle({ title: `网页评注：${error.message}` }));
+});
+chrome.runtime.onInstalled.addListener(() => { reconcile().catch(console.error); });
+chrome.runtime.onStartup.addListener(() => { reconcile().catch(console.error); });
+chrome.permissions.onRemoved.addListener(() => { reconcile().catch(console.error); });
+// Existing tabs also receive the tool when the user switches to them after enabling.
+chrome.tabs.onActivated?.addListener(({ tabId }) => {
+  settings().then(async state => {
+    if (!state.enabled) return;
+    const tab = await chrome.tabs.get(tabId);
+    if (/^https?:\/\//.test(tab.url || '')) await chrome.scripting.executeScript({ target: { tabId }, files: SCRIPT_FILES });
+  }).catch(() => {});
+});
+
+async function imageData(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer()); let binary = '';
+  for (let i = 0; i < bytes.length; i += 16384) binary += String.fromCharCode(...bytes.subarray(i, i + 16384));
+  return `data:${blob.type};base64,${btoa(binary)}`;
+}
+async function capture(message, sender) {
+  pageSender(sender);
+  if (!(await settings()).enabled) throw new Error('网页评注已关闭');
+  if (message.url !== sender.url) throw new Error('页面已经变化，请重新选择');
+  const tab = await chrome.tabs.get(sender.tab.id);
+  const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  if (active?.id !== tab.id || tab.url !== message.url) throw new Error('网页不在当前前台，未截取其他标签页');
+  if (Date.now() - (captures.get(tab.id) || 0) < 600) throw new Error('截图操作过快，请稍后点重试截图');
+  captures.set(tab.id, Date.now());
+  const data = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const after = await chrome.tabs.get(tab.id), [activeAfter] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+  if (after.url !== message.url || activeAfter?.id !== tab.id) throw new Error('截图期间页面已切换，本次画面未保存');
+  const viewport = message.viewport;
+  if (!viewport || viewport.width < 1 || viewport.height < 1) throw new Error('视口尺寸无效');
+  const bitmap = await createImageBitmap(new Blob([Core.dataBytes(data)], { type: 'image/png' }));
+  try {
+    const ratioX = bitmap.width / viewport.width, ratioY = bitmap.height / viewport.height;
+    const r = message.rect || { left: 0, top: 0, width: viewport.width, height: viewport.height };
+    if (r.left >= viewport.width || r.top >= viewport.height || r.left + r.width <= 0 || r.top + r.height <= 0) throw new Error('关注区域不在视口内，请滚回原位置后重试');
+    const left = Math.max(0, Math.floor(r.left * ratioX)), top = Math.max(0, Math.floor(r.top * ratioY));
+    const width = Math.max(1, Math.min(bitmap.width, Math.ceil((r.left + r.width) * ratioX)) - left), height = Math.max(1, Math.min(bitmap.height, Math.ceil((r.top + r.height) * ratioY)) - top);
+    const context = new OffscreenCanvas(bitmap.width, bitmap.height), ctx = context.getContext('2d'); ctx.drawImage(bitmap, 0, 0);
+    if (message.noteType !== 'page') { ctx.strokeStyle = '#2864ef'; ctx.lineWidth = Math.max(2, ratioX * 2); ctx.strokeRect(left + 1, top + 1, width - 2, height - 2); }
+    const asset = { viewport: await imageData(await context.convertToBlob({ type: 'image/jpeg', quality: 0.88 })), width: bitmap.width, height: bitmap.height, capturedAt: new Date().toISOString() };
+    if (message.noteType !== 'page') {
+      const crop = new OffscreenCanvas(width, height); crop.getContext('2d').drawImage(bitmap, left, top, width, height, 0, 0, width, height);
+      asset.crop = await imageData(await crop.convertToBlob({ type: 'image/png' }));
+    }
+    return asset;
+  } finally { bitmap.close(); }
+}
+async function handle(message, sender) {
+  if (!message || typeof message.type !== 'string' || sender.id !== chrome.runtime.id) throw new Error('无效请求');
+  const ownPage = librarySender(sender) ? null : pageSender(sender);
+  switch (message.type) {
+    case 'GET_SETTINGS': return settings();
+    case 'DISABLE': return setEnabled(false);
+    case 'SAVE_DOCK': {
+      const bottom = Number(message.dock?.bottom);
+      if (!Number.isFinite(bottom)) throw new Error('位置无效');
+      await chrome.storage.local.set({ dock: { side: message.dock.side === 'left' ? 'left' : 'right', bottom: Math.max(16, Math.min(bottom, 2000)) } }); return true;
+    }
+    case 'OPEN_LIBRARY': await chrome.tabs.create({ url: chrome.runtime.getURL('library.html') }); return true;
+    case 'LIST': return DB.list(ownPage || undefined);
+    case 'GET_ASSET': {
+      const note = await DB.get(message.id); if (!note || (ownPage && note.pageId !== ownPage)) throw new Error('找不到本页记录'); return DB.asset(note.id);
+    }
+    case 'CAPTURE': return capture(message, sender);
+    case 'SAVE': {
+      if (!(await settings()).enabled && ownPage) throw new Error('网页评注已关闭，内容仍在输入框中');
+      const input = Core.safeNote(message.note);
+      if (ownPage && input.pageId !== ownPage) throw new Error('不能从本页写入其他网页');
+      const existing = input.id ? await DB.get(input.id) : null;
+      if (input.id && !existing) throw new Error('原记录不存在，请重新打开');
+      if (existing && ownPage && existing.pageId !== ownPage) throw new Error('不能修改其他网页的记录');
+      if (existing && message.revision !== existing.revision) throw new Error('这条评注已在别处更新，请重新打开后编辑');
+      const timestamp = new Date().toISOString();
+      // Editing changes the comment, not its historic screenshot or anchor.
+      if (existing) return DB.patch(existing.id, current => {
+        if (ownPage && current.pageId !== ownPage) throw new Error('不能修改其他网页的记录');
+        if (message.revision !== current.revision) throw new Error('这条评注已在别处更新，请重新打开后编辑');
+        return { ...current, comment: input.comment, kind: input.kind, originalComment: current.originalComment || current.comment, history: [...(current.history || []), { comment: current.comment, kind: current.kind, at: timestamp }], updatedAt: timestamp, revision: current.revision + 1 };
+      });
+      const note = { ...input, id: crypto.randomUUID(), createdAt: timestamp, updatedAt: timestamp, originalComment: input.comment, revision: 1, locationStatus: 'found', hasImage: Boolean(message.asset) };
+      const image = existing ? null : message.asset;
+      if (image && ((!/^data:image\/jpeg;base64,/.test(image.viewport || '')) || JSON.stringify(image).length > 16000000)) throw new Error('画面过大或格式无效，请重新截图');
+      if (!existing && !image && !message.allowWithoutImage) throw new Error('截图尚未完成，请重试或明确选择仅保存文字');
+      await DB.save(note, image); return note;
+    }
+    case 'LOCATION_RESULTS': {
+      if (!ownPage || !Array.isArray(message.results)) return false;
+      for (const item of message.results.slice(0, 500)) {
+        if (!['found', 'uncertain', 'missing', 'changed'].includes(item.status)) continue;
+        try { await DB.patch(item.id, note => note.pageId === ownPage && note.locationStatus !== item.status ? { ...note, locationStatus: item.status, checkedAt: new Date().toISOString() } : null); } catch (error) { if (!(await DB.get(item.id))) continue; throw error; }
+      }
+      return true;
+    }
+    case 'REBIND': {
+      return DB.patch(message.id, note => {
+        if (note.pageId !== ownPage) throw new Error('找不到本页记录');
+        return { ...note, anchor: message.anchor, region: null, type: 'element', pageSignature: String(message.pageSignature || '').slice(0, 6000), locationStatus: 'found', reboundAt: new Date().toISOString(), revision: note.revision + 1, originalAnchor: note.originalAnchor || note.anchor };
+      });
+    }
+    case 'SET_OUTCOME': {
+      if (!librarySender(sender) || !['pending', 'adopted', 'rejected'].includes(message.status)) throw new Error('结果状态无效');
+      return DB.patch(message.id, note => ({ ...note, outcome: { status: message.status, reason: String(message.reason || '').slice(0, 4000), updatedAt: new Date().toISOString() }, revision: note.revision + 1 }));
+    }
+    case 'DELETE': {
+      if (!librarySender(sender)) throw new Error('请在保存库中删除记录'); await DB.remove(message.id); return true;
+    }
+    case 'OPEN_NOTE': {
+      if (!librarySender(sender)) throw new Error('请从保存库打开原网页');
+      const note = await DB.get(message.id); if (!note) throw new Error('记录不存在');
+      const tab = await chrome.tabs.create({ url: note.url }); await chrome.storage.session.set({ ['focus:' + tab.id]: note.id }); return true;
+    }
+    case 'TAKE_FOCUS': {
+      pageSender(sender); const key = 'focus:' + sender.tab.id; const entry = await chrome.storage.session.get(key); await chrome.storage.session.remove(key); return entry[key] || null;
+    }
+    default: throw new Error('不支持的操作');
+  }
+}
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  handle(message, sender).then(value => respond({ ok: true, value }), error => respond({ ok: false, error: error.message || '操作失败' })); return true;
+});
