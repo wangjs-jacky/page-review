@@ -1,0 +1,76 @@
+{
+  "demo": true,
+  "pages": [
+    {
+      "id": "fieldnotes",
+      "name": "Fieldnotes",
+      "title": "让好内容，更容易被找到。",
+      "url": "https://fieldnotes.example/reading",
+      "art": "assets/fieldnotes.svg",
+      "ink": "#3b6755",
+      "pale": "#eef3eb"
+    },
+    {
+      "id": "atelier",
+      "name": "Atelier",
+      "title": "按正在做的事，整理资料。",
+      "url": "https://atelier.example/collections",
+      "art": "assets/atelier.svg",
+      "ink": "#9f7353",
+      "pale": "#f6eee4"
+    },
+    {
+      "id": "mono",
+      "name": "Mono",
+      "title": "一点点展开，刚刚好的解释。",
+      "url": "https://mono.example/reveal",
+      "art": "assets/mono.svg",
+      "ink": "#79629d",
+      "pale": "#f2eef9"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "note-01",
+      "pageId": "fieldnotes",
+      "comment": "目录跟着阅读位置，长文章也不会迷路。想参考这条导航路径。",
+      "feedback": "positive",
+      "status": "synced"
+    },
+    {
+      "id": "note-02",
+      "pageId": "fieldnotes",
+      "comment": "把关联阅读接在当前话题后面，查资料不必回首页。",
+      "feedback": null,
+      "status": "synced"
+    },
+    {
+      "id": "note-03",
+      "pageId": "atelier",
+      "comment": "导航分类按正在做的事来组织，更容易找到入口。",
+      "feedback": "positive",
+      "status": "synced"
+    },
+    {
+      "id": "note-04",
+      "pageId": "atelier",
+      "comment": "说明文字太多，来源和更新时间应该保留。",
+      "feedback": "negative",
+      "status": "synced"
+    },
+    {
+      "id": "note-05",
+      "pageId": "mono",
+      "comment": "悬停不同部分时就在附近出现解释，响应区域很清楚。",
+      "feedback": "positive",
+      "status": "synced"
+    },
+    {
+      "id": "note-local-06",
+      "pageId": "fieldnotes",
+      "comment": "新的一条导航观察，还没同步。",
+      "feedback": null,
+      "status": "local"
+    }
+  ]
+}
