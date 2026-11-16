@@ -1,14 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Page Review · 网页评注",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "标下网页上值得关注的地方，保存评注和画面，跨网页整理给 AI。",
   "minimum_chrome_version": "120",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
-    "identity"
+    "identity",
+    "tabCapture",
+    "offscreen",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -34,6 +37,15 @@
     "open_in_tab": true
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self'; base-uri 'none'"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self'; base-uri 'none'; media-src 'self' data: blob:"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+9",
+        "mac": "Command+Shift+9"
+      },
+      "description": "启用网页评注或确认本页录制"
+    }
   }
 }

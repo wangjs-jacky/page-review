@@ -1,74 +1,406 @@
 (function () {
-  'use strict';
-  const app = document.getElementById('app'), detail = document.getElementById('detail-dialog'), access = document.getElementById('access-dialog');
-  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const paths = { cloud: '<path d="M6 18a4 4 0 0 1-1-8 7 7 0 0 1 13-1 4.5 4.5 0 0 1 0 9Z"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>', like: '<path d="M7 10v11H3V10h4Zm0 0 5-7c1-1 3 0 3 2l-1 5h5a2 2 0 0 1 2 2l-2 7a3 3 0 0 1-3 2H7"/>', dislike: '<path d="M7 14V3H3v11h4Zm0 0 5 7c1 1 3 0 3-2l-1-5h5a2 2 0 0 0 2-2l-2-7a3 3 0 0 0-3-2H7"/>' };
-  const icon = name => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (paths[name] || paths.cloud) + '</svg>';
-  const state = { notes: [], cloud: {}, query: '', filter: 'all', page: null, editing: null, editingFeedback: null, preview: null, deleting: null, connections: [], once: null, mode: 'skill', remote: null, busy: false };
-  const pictures = new Map(); let toastTimer;
-  async function send(type, payload = {}) { const r = await chrome.runtime.sendMessage({ type, ...payload }); if (!r?.ok) throw new Error(r?.error || '无法读取资料'); return r.value; }
-  function toast(text) { clearTimeout(toastTimer); const el = document.getElementById('toast'); el.textContent = text; el.classList.add('visible'); toastTimer = setTimeout(() => el.classList.remove('visible'), 4000); }
-  const feedback = n => n.feedback ? '<span class="feedback-value ' + esc(n.feedback) + '" role="img" aria-label="' + (n.feedback === 'positive' ? '点赞' : '点踩') + '">' + icon(n.feedback === 'positive' ? 'like' : 'dislike') + '</span>' : '';
-  const syncLabel = n => n.cloud?.status === 'synced' ? '云端已保存' : n.cloud?.status === 'conflict' || n.cloud?.status === 'conflict-preserved' ? '云端修订待处理' : n.cloud?.workspaceId ? '待同步' : '仅本机';
-  function groups() { const map = new Map(); for (const n of state.notes) { if (!map.has(n.pageId)) map.set(n.pageId, { id: n.pageId, title: n.title, url: n.url, notes: [] }); map.get(n.pageId).notes.push(n); } return [...map.values()]; }
-  function visible() { const q = state.query.toLowerCase(); return groups().filter(g => (!q || [g.title, g.url, ...g.notes.map(n => n.comment)].join(' ').toLowerCase().includes(q)) && (state.filter === 'all' || g.notes.some(n => state.filter === 'pending' ? n.cloud?.workspaceId && n.cloud.status !== 'synced' : n.feedback === state.filter))); }
-  async function images(container) { for (const el of container.querySelectorAll('[data-image]')) { const id = el.dataset.image; if (!id) continue; try { if (!pictures.has(id)) pictures.set(id, await send('GET_ASSET', { id })); const image = pictures.get(id); if (!el.isConnected || !image?.viewport) continue; if (el.tagName === 'IMG') el.src = image.viewport; else { const img = document.createElement('img'); img.src = image.viewport; img.alt = '记录时网页画面'; el.replaceChildren(img); } } catch {} } }
-  function card(g) { const first = g.notes[0], pending = g.notes.filter(n => n.cloud?.workspaceId && n.cloud.status !== 'synced').length, host = new URL(g.url).hostname;
-    return '<article class="page-card" data-action="detail" data-page="' + esc(g.id) + '"><div class="card-art" data-image="' + esc(g.notes.find(n => n.hasImage)?.id || '') + '"><span class="placeholder">↗</span></div><button class="card-body" aria-label="查看 ' + esc(g.title || host) + ' 评论"><div class="card-source"><span class="favicon">' + esc(host[0]) + '</span>' + esc(host) + '</div><h2>' + esc(g.title || host) + '</h2><p class="card-excerpt">' + feedback(first) + esc(first.comment) + '</p><div class="card-foot"><span>' + g.notes.length + ' 条评论</span><span>' + (pending ? pending + ' 条待同步' : g.notes.every(n => n.cloud?.status === 'synced') ? icon('cloud') + ' 已同步' : '仅本机') + '</span></div></button></article>';
+  "use strict";
+  const app = document.getElementById("app"),
+    detail = document.getElementById("detail-dialog"),
+    access = document.getElementById("access-dialog"),
+    deletion = document.getElementById("delete-dialog"),
+    error = document.getElementById("history-error");
+  const esc = (v) =>
+    String(v ?? "").replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
+    );
+  const icons = {
+    close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    like: '<path d="M7 10v11H3V10h4Zm0 0 5-7c1-1 3 0 3 2l-1 5h5a2 2 0 0 1 2 2l-2 7a3 3 0 0 1-3 2H7"/>',
+    dislike:
+      '<path d="M7 14V3H3v11h4Zm0 0 5 7c1 1 3 0 3-2l-1-5h5a2 2 0 0 0 2-2l-2-7a3 3 0 0 0-3-2H7"/>',
+    note: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6"/>',
+  };
+  const icon = (n) =>
+      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[n] || icons.note}</svg>`,
+    clock = (s) =>
+      Math.floor((s || 0) / 60) +
+      ":" +
+      String(Math.floor((s || 0) % 60)).padStart(2, "0"),
+    time = (t) =>
+      new Date(t).toLocaleString("zh-CN", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    feedback = (n) =>
+      n.feedback
+        ? `<span class="feedback ${n.feedback}" aria-label="${n.feedback === "positive" ? "点赞" : "点踩"}">${icon(n.feedback === "positive" ? "like" : "dislike")}</span>`
+        : "";
+  const state = {
+    notes: [],
+    cloud: {},
+    query: "",
+    date: "all",
+    from: "",
+    to: "",
+    selected: null,
+    editing: false,
+    editingFeedback: null,
+    busy: false,
+    deleting: null,
+    picture: false,
+    remote: null,
+  };
+  const assets = new Map();
+  let toastTimer;
+  async function send(type, payload = {}) {
+    const r = await chrome.runtime.sendMessage({ type, ...payload });
+    if (!r?.ok) throw Error(r?.error || "操作失败");
+    return r.value;
+  }
+  function toast(text) {
+    const el = document.getElementById("toast");
+    clearTimeout(toastTimer);
+    el.textContent = text;
+    el.classList.add("visible");
+    toastTimer = setTimeout(() => el.classList.remove("visible"), 4000);
+  }
+  function range() {
+    if (state.date === "custom") {
+      if (
+        state.from &&
+        state.to &&
+        Date.parse(state.from) > Date.parse(state.to)
+      )
+        throw Error("结束时间早于开始时间");
+      return {
+        from: state.from ? new Date(state.from).toISOString() : null,
+        to: state.to ? new Date(state.to).toISOString() : null,
+      };
+    }
+    if (state.date === "all") return {};
+    const now = new Date(),
+      from = new Date(now);
+    from.setHours(0, 0, 0, 0);
+    if (state.date === "week") from.setDate(from.getDate() - 6);
+    return { from: from.toISOString(), to: now.toISOString() };
+  }
+  function visible() {
+    let r;
+    try {
+      r = range();
+    } catch {
+      return [];
+    }
+    return state.notes.filter(
+      (n) =>
+        (!r.from || n.createdAt >= r.from) &&
+        (!r.to || n.createdAt <= r.to) &&
+        (!state.query ||
+          [n.title, n.url, n.comment]
+            .join(" ")
+            .toLowerCase()
+            .includes(state.query.toLowerCase())),
+    );
   }
   function render() {
-    const active = document.activeElement?.id === 'search', start = active ? document.activeElement.selectionStart : null;
-    const c = state.cloud, pending = c.pending?.length || 0, synced = state.notes.filter(n => n.cloud?.status === 'synced').length;
-    const status = !c.configured ? '已保存在本机' : pending ? synced + ' 条云端已保存 · ' + pending + ' 条待同步' : synced + ' 条云端已保存';
-    app.innerHTML = '<header class="cloud-heading"><div><h1>我的网页资料库</h1><p>浏览时留下的评论、赞踩和画面，都在这里。</p></div><label class="search-field">' + icon('search') + '<input id="search" type="search" aria-label="搜索资料" placeholder="搜索网页或评论" value="' + esc(state.query) + '"></label></header><div class="cloud-status"><span class="status-dot"></span>' + status + (c.configured ? '<button class="text-button" data-action="sync">立即同步</button>' : '<button class="text-button" data-action="access">登录并开启同步</button>') + '</div><div class="library-tools"><div class="filter-tabs">' + [['all', '全部'], ['positive', '点赞'], ['negative', '点踩'], ['pending', '待同步']].map(([key, label]) => '<button data-action="filter" data-filter="' + key + '" class="' + (key === state.filter ? 'active' : '') + '">' + label + '</button>').join('') + '</div><button class="text-button" data-action="access">管理 AI 访问 →</button></div><div class="library-grid">' + (visible().map(card).join('') || '<div class="empty-state"><strong>还没有匹配的网页</strong><p>浏览网页时，用悬浮球留下评论。</p></div>') + '</div>' + (c.pending?.some(n => n.kind === 'delete') ? '<div class="cloud-deletions">' + c.pending.filter(n => n.kind === 'delete').map(n => '<p>云端删除待同步：' + esc(n.localComment || n.id) + (n.conflict ? ' · 云端存在其他修订' : '') + '</p>').join('') + '</div>' : '') + '<div class="library-note">' + (c.configured ? '已同步资料可由授权的 Agent 按需读取。' : '登录后，新标注自动同步；授权的Agent可以按需读取。') + '</div>';
-    document.getElementById('access-button').textContent = c.configured ? 'AI 访问设置' : '登录并开启同步'; images(app);
-    if (active) { const input = document.getElementById('search'); input.focus(); if (start !== null) try { input.setSelectionRange(start, start); } catch {} }
+    const rows = visible();
+    document.getElementById("count").textContent = rows.length + " 条评注";
+    app.innerHTML = rows.length
+      ? rows
+          .map(
+            (n) =>
+              `<button class="history-row" data-action="detail" data-id="${n.id}">${n.hasImage ? `<img data-image="${n.id}" alt="${n.hasVideo ? "录制封面" : "截图"}">` : `<span class="no-media">${icon("note")}</span>`}<span class="history-content"><strong>${esc(n.title || new URL(n.url).hostname)}${n.hasVideo ? `<b class="video-flag">▶ ${clock(n.recording?.duration)}</b>` : ""}</strong><span class="row-comment">${feedback(n)}${esc(n.comment)}</span></span><time>${time(n.createdAt)}</time></button>`,
+          )
+          .join("")
+      : '<div class="empty-state">没有匹配的评注</div>';
+    images(app);
   }
-  async function reload() { [state.notes, state.cloud] = await Promise.all([send('LIST'), send('CLOUD_STATUS')]); render(); }
-  function renderDetail() {
-    const g = groups().find(g => g.id === state.page); if (!g) { detail.close(); return; }
-    const loc = { found: '最近可定位', uncertain: '位置待确认', missing: '原位置失效', changed: '页面已变化' };
-    detail.innerHTML = '<header class="drawer-head"><div><h2>' + esc(g.title || new URL(g.url).hostname) + '</h2><p>' + g.notes.length + ' 条评论 · ' + esc(new URL(g.url).hostname) + '</p></div><button class="icon-btn" data-action="close-detail" aria-label="关闭详情">' + icon('close') + '</button></header><div class="drawer-content">' + g.notes.map(n => '<article class="drawer-note"><div class="drawer-note-head">' + feedback(n) + '<span class="status-label">' + (loc[n.locationStatus] || '未检查原页') + '</span><span class="status-label" data-sync-label="' + n.id + '">' + syncLabel(n) + '</span></div>' + (state.editing === n.id ? '<textarea data-edit-comment="' + n.id + '" aria-label="编辑评论" maxlength="12000">' + esc(n.comment) + '</textarea><div class="edit-actions"><div class="feedback-actions">' + ['positive', 'negative'].map(v => '<button class="feedback-button ' + (state.editingFeedback === v ? 'selected' : '') + '" data-action="edit-feedback" data-feedback="' + v + '" aria-label="' + (v === 'positive' ? '点赞' : '点踩') + '">' + icon(v === 'positive' ? 'like' : 'dislike') + '</button>').join('') + '</div><button class="btn small" data-action="cancel-edit">取消</button><button class="btn primary small" data-action="save-edit" data-id="' + n.id + '">保存</button></div>' : '<p>' + esc(n.comment) + '</p>') + '<div class="drawer-note-actions"><button data-action="preview" data-id="' + n.id + '">查看原画面</button><button data-action="open" data-id="' + n.id + '">回到网页</button><button data-action="edit" data-id="' + n.id + '">编辑</button><button data-action="delete" data-id="' + n.id + '">删除</button>' + (n.cloud?.status === 'conflict' ? '<button data-action="conflict" data-id="' + n.id + '">查看云端修订</button>' : '') + '</div>' + (state.preview === n.id ? n.hasImage ? '<img class="snapshot-thumb" data-image="' + n.id + '" alt="记录时原画面">' : '<p class="muted">这条记录没有画面。</p>' : '') + (state.remote?.id === n.id ? '<div class="drawer-banner"><p>本机：' + esc(n.comment) + '</p><p>云端：' + esc(state.remote.note.comment) + '</p><button class="btn small" data-action="fork" data-id="' + n.id + '">本机意见另存为新记录</button></div>' : '') + '<details class="outcome-editor"><summary>记录后续结果</summary><select data-outcome="' + n.id + '" aria-label="采纳结果">' + [['pending', '未决定'], ['adopted', '已采纳'], ['rejected', '不采用']].map(([v, label]) => '<option value="' + v + '" ' + (v === (n.outcome?.status || 'pending') ? 'selected' : '') + '>' + label + '</option>').join('') + '</select><textarea data-reason="' + n.id + '" aria-label="采纳或不采用的理由" maxlength="4000">' + esc(n.outcome?.reason || '') + '</textarea><button class="text-button" data-action="outcome" data-id="' + n.id + '">保存结果</button></details>' + (n.history?.length ? '<details class="history"><summary>修改前的原话</summary>' + n.history.map(h => '<p>' + feedback(h) + esc(h.comment) + '</p>').join('') + '</details>' : '') + '</article>').join('') + '</div><footer class="drawer-footer"><button class="btn" data-action="access">AI 访问设置</button></footer>';
-    images(detail);
+  async function image(id) {
+    if (!assets.has(id)) assets.set(id, await send("GET_ASSET", { id }));
+    return assets.get(id);
   }
-  function renderAccess() {
-    const c = state.cloud, connected = c.configured;
-    access.innerHTML = '<header class="modal-head"><h2>' + (connected ? 'AI 访问设置' : '登录网页评注') + '</h2><button class="icon-btn" data-action="close-access" aria-label="关闭访问设置">' + icon('close') + '</button></header>' + (!connected ? '<p class="access-info">用GitHub或Google账号登录，自动拥有你的私人网页资料库。</p>' + (!c.serviceConfigured ? '<p class="drawer-banner">此安装包尚未配置登录服务。</p>' : '') + '<label class="migration-choice"><input id="migrate-existing" type="checkbox">同时上传已有的本机标注</label><button class="btn primary" data-action="login" ' + (!c.serviceConfigured ? 'disabled' : '') + '>登录并开启同步</button>' : '<p class="access-info">' + esc(c.name || '当前账号') + ' · 私人网页资料库</p><div class="access-summary"><div class="access-row"><span>可读取</span><strong>来源、原评论、赞踩与画面</strong></div><div class="access-row"><span>访问范围</span><strong>我的私人资料库</strong></div><div class="access-row"><span>Agent权限</span><strong>只读</strong></div></div><div class="access-tabs">' + ['skill', 'api'].map(v => '<button data-action="mode" data-mode="' + v + '" class="' + (v === state.mode ? 'active' : '') + '">' + (v === 'skill' ? 'Skill' : 'API') + '</button>').join('') + '</div>' + (state.mode === 'skill' ? '<p class="access-info">使用Page Review Skill及首次连接配置。在Agent里提出任务，它会自行检索相关评论和画面。</p>' : '<pre class="access-config">GET /v1/annotations?q=导航\nGET /v1/annotations/:id/context\nGET /v1/assets/:id</pre>') + state.connections.filter(x => !x.revoked_at).map(x => '<div class="connection-bar"><div class="connection-name"><strong>' + esc(x.name) + '</strong><span class="readonly-badge">● 只读</span></div><p>最近读取：' + (x.last_read_at ? esc(new Date(x.last_read_at).toLocaleString()) : '尚未读取') + '</p><button class="danger-link" data-action="revoke" data-id="' + x.id + '">撤销连接</button></div>').join('') + (state.once ? '<div class="drawer-banner">只读连接已创建。<button class="text-button" data-action="download-config">保存首次连接配置</button></div>' : '<button class="btn primary" data-action="create-reader">创建Agent只读连接</button>') + '<p class="access-help">首次配置不是传递网页资料。之后由Agent通过只读接口获取。</p><button class="danger-link" data-action="disconnect">退出当前账号</button>');
+  async function images(container) {
+    for (const el of container.querySelectorAll("[data-image]"))
+      try {
+        const a = await image(el.dataset.image);
+        if (el.isConnected && a?.viewport) el.src = a.viewport;
+      } catch {
+        el.alt = "附件暂不可用";
+      }
   }
-  async function openAccess() { if (state.editing) throw new Error('请先保存或取消编辑'); if (detail.open) detail.close(); state.connections = state.cloud.configured ? (await send('CLOUD_CONNECTIONS')).items : []; renderAccess(); if (!access.open) access.showModal(); }
-  document.addEventListener('input', e => { if (e.target.id === 'search') { state.query = e.target.value; const grid = app.querySelector('.library-grid'); grid.innerHTML = visible().map(card).join('') || '<div class="empty-state">没有匹配的网页</div>'; images(grid); } });
-  document.addEventListener('click', async e => {
-    const b = e.target.closest('[data-action]'); if (!b || state.busy) return; const a = b.dataset.action, id = b.dataset.id;
+  async function reload({ remote = false } = {}) {
+    error.hidden = true;
+    if (remote)
+      try {
+        await send("CLOUD_LIBRARY", { filters: range() });
+      } catch (e) {
+        error.textContent = e.message;
+        error.hidden = false;
+      }
+    [state.notes, state.cloud] = await Promise.all([
+      send("LIST"),
+      send("CLOUD_STATUS"),
+    ]);
+    render();
+  }
+  const head = (title) =>
+    `<header class="modal-head"><h2>${title}</h2><button class="icon-btn" data-action="close-${title === "连接设置" ? "settings" : "detail"}" aria-label="关闭${title}">${icon("close")}</button></header>`;
+  async function showDetail() {
+    const n = state.notes.find((n) => n.id === state.selected);
+    if (!n) {
+      detail.close();
+      return;
+    }
+    let a = assets.get(n.id);
+    detail.innerHTML =
+      head("评注详情") +
+      `<div class="detail-body"><div class="detail-source"><button class="text-button" data-action="open">${esc(new URL(n.url).hostname)}</button><time>${time(n.createdAt)}</time></div>${state.editing ? `<textarea id="edit-comment" aria-label="修改评注" maxlength="12000">${esc(n.comment)}</textarea><div class="detail-actions">${["positive", "negative"].map((v) => `<button class="icon-btn" data-action="feedback" data-value="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${state.editingFeedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}<button class="btn" data-action="cancel-edit">取消</button><button class="btn primary" data-action="save-edit">保存</button></div>` : `${feedback(n)}<p class="detail-comment">${esc(n.comment)}</p><div class="detail-actions"><button class="text-button" data-action="edit">修改</button><button class="text-button" data-action="delete">删除</button>${n.cloud?.status === "conflict" ? '<button class="text-button" data-action="conflict">处理同步冲突</button>' : ""}</div>`}${n.hasImage ? '<div id="detail-media" class="detail-media"></div>' : ""}${state.remote ? `<div class="conflict"><p>云端：${esc(state.remote.note.comment)}</p><button class="btn" data-action="fork">将本机意见另存</button></div>` : ""}</div><footer class="detail-footer"><button class="btn" data-action="open">返回网页</button><button class="btn primary" data-action="copy-page">复制本页评注</button></footer>`;
+    if (!detail.open) detail.showModal();
+    if (n.hasImage) {
+      try {
+        a = await image(n.id);
+        if (state.selected !== n.id || !detail.open) return;
+        const target = document.getElementById("detail-media");
+        if (target)
+          target.innerHTML = a?.video
+            ? `<video controls muted playsinline src="${a.video}" poster="${a.viewport}"></video><div class="keyframes">${a.frames.map((f, i) => `<button data-action="seek" data-index="${i}" aria-label="跳转 ${clock(f.at)}"><img src="${f.data}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>`
+            : a?.viewport
+              ? `<button class="image-preview" data-action="enlarge" aria-label="放大截图"><img src="${a.viewport}" alt="截图"></button>`
+              : "";
+      } catch (e) {
+        const target = document.getElementById("detail-media");
+        if (target)
+          target.innerHTML = `<p class="inline-error">${esc(e.message)}</p><button class="text-button" data-action="retry-media">重试</button>`;
+      }
+    }
+  }
+  function renderSettings() {
+    const c = state.cloud,
+      connected = c.configured,
+      ready = c.cliConnections?.length,
+      cap = c.capabilities;
+    const deleted = (c.pending || []).filter(
+      (n) => n.kind === "delete" && n.conflict,
+    );
+    access.innerHTML =
+      head("连接设置") +
+      `<div class="settings-body">${!connected ? '<button class="btn primary" data-action="login">登录账号</button>' : `<div class="account-row"><strong>${esc(c.name || "已登录")}</strong><button class="text-button" data-action="logout">退出</button></div>${ready ? c.cliConnections.map((n) => `<div class="connection"><div><strong>${esc(n.device_name)}</strong><span>已连接</span></div><button class="text-button" data-action="revoke" data-id="${n.id}">撤销</button></div>`).join("") : cap?.cliAvailable ? '<button class="btn primary" data-action="copy-install">复制 macOS 安装命令</button><button class="btn" data-action="copy-login">复制终端登录命令</button>' : `<p class="muted">${cap ? "终端安装包尚未发布" : "服务需要更新，暂不能连接终端"}</p>`}<button class="text-button" data-action="check">检查连接</button>${c.pending?.length ? `<div class="sync-error"><span>${c.pending.length} 条待同步</span><button class="text-button" data-action="sync">重试同步</button></div>` : ""}`}${deleted.map((n) => `<div class="sync-error"><span>${esc(n.localComment)}<br>云端记录已有修改</span><button class="text-button" data-action="restore-deleted" data-id="${n.id}">恢复云端记录</button></div>`).join("")}<p id="settings-error" class="inline-error" role="alert"></p></div>`;
+  }
+  async function settings() {
+    if (state.editing) throw Error("请先保存或取消修改");
+    state.cloud = await send("CLOUD_SETUP");
+    renderSettings();
+    if (!access.open) access.showModal();
+  }
+  async function copy(text) {
     try {
-      if (a === 'filter') { state.filter = b.dataset.filter; render(); }
-      if (a === 'detail') { state.page = b.dataset.page; state.editing = null; state.remote = null; renderDetail(); detail.showModal(); }
-      if (a === 'close-detail') { if (state.editing) throw new Error('请先保存或取消编辑'); detail.close(); }
-      if (a === 'access') await openAccess();
-      if (a === 'close-access') { access.close(); state.once = null; }
-      if (a === 'mode') { state.mode = b.dataset.mode; renderAccess(); }
-      if (a === 'login') { state.busy = true; b.disabled = true; await send('CLOUD_LOGIN', { migrateExisting: document.getElementById('migrate-existing').checked }); await reload(); state.connections = (await send('CLOUD_CONNECTIONS')).items; renderAccess(); toast('已登录，新标注将自动同步'); }
-      if (a === 'sync') { state.busy = true; b.disabled = true; await send('CLOUD_SYNC'); await reload(); toast(state.cloud.pending.length ? '部分资料仍待同步，请查看状态' : '资料已同步'); }
-      if (a === 'create-reader') { state.busy = true; state.once = await send('CLOUD_CREATE_CONNECTION', { name: '我的 Agent' }); state.connections = (await send('CLOUD_CONNECTIONS')).items; renderAccess(); }
-      if (a === 'download-config') { const bytes = JSON.stringify({ apiUrl: state.cloud.apiUrl, token: state.once.token }, null, 2), url = URL.createObjectURL(new Blob([bytes], { type: 'application/json' })), link = document.createElement('a'); link.href = url; link.download = 'page-review-agent.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); }
-      if (a === 'revoke') { await send('CLOUD_REVOKE', { id }); state.once = null; state.connections = (await send('CLOUD_CONNECTIONS')).items; renderAccess(); toast('只读连接已撤销'); }
-      if (a === 'disconnect') { state.busy = true; await send('CLOUD_DISCONNECT'); state.once = null; await reload(); renderAccess(); }
-      if (a === 'open') await send('OPEN_NOTE', { id });
-      if (a === 'preview') { state.preview = state.preview === id ? null : id; renderDetail(); }
-      if (a === 'edit') { if (state.editing && state.editing !== id) throw new Error('请先处理当前编辑'); state.editing = id; state.editingFeedback = state.notes.find(n => n.id === id).feedback; renderDetail(); }
-      if (a === 'edit-feedback') { state.editingFeedback = state.editingFeedback === b.dataset.feedback ? null : b.dataset.feedback; detail.querySelectorAll('[data-action="edit-feedback"]').forEach(n => n.classList.toggle('selected', n.dataset.feedback === state.editingFeedback)); }
-      if (a === 'cancel-edit') { state.editing = null; renderDetail(); }
-      if (a === 'save-edit') { const n = state.notes.find(n => n.id === id); await send('SAVE', { note: { ...n, comment: detail.querySelector('[data-edit-comment]').value, feedback: state.editingFeedback }, revision: n.revision }); state.editing = null; await reload(); renderDetail(); toast('修改已保存'); }
-      if (a === 'outcome') { await send('SET_OUTCOME', { id, status: detail.querySelector('[data-outcome="' + id + '"]').value, reason: detail.querySelector('[data-reason="' + id + '"]').value }); await reload(); renderDetail(); toast('后续结果已保存'); }
-      if (a === 'delete') { state.deleting = id; document.getElementById('delete-dialog').showModal(); }
-      if (a === 'conflict') { state.remote = await send('CLOUD_REMOTE', { id }); renderDetail(); }
-      if (a === 'fork') { await send('CLOUD_FORK', { id }); pictures.delete(id); state.remote = null; await reload(); renderDetail(); toast('已另存本机意见；未覆盖云端修订'); }
-    } catch (error) { await reload(); if(access.open){state.once=null;renderAccess();} toast(error.message); } finally { state.busy = false; if (b.isConnected) b.disabled = false; }
+      await navigator.clipboard.writeText(text);
+    } catch {
+      await send("COPY_TEXT", { text });
+    }
+    toast("已复制");
+  }
+  async function act(b) {
+    const a = b.dataset.action,
+      n = state.notes.find((n) => n.id === state.selected);
+    if (a === "settings") {
+      await settings();
+      return;
+    }
+    if (a === "close-settings") {
+      access.close();
+      return;
+    }
+    if (a === "refresh") {
+      await reload({ remote: true });
+      return;
+    }
+    if (a === "detail") {
+      if (state.editing) throw Error("请先保存或取消修改");
+      state.selected = b.dataset.id;
+      state.remote = null;
+      await showDetail();
+      return;
+    }
+    if (a === "close-detail") {
+      if (state.editing) throw Error("请先保存或取消修改");
+      detail.close();
+      return;
+    }
+    if (a === "open") return send("OPEN_NOTE", { id: n.id });
+    if (a === "edit") {
+      state.editing = true;
+      state.editingFeedback = n.feedback;
+      return showDetail();
+    }
+    if (a === "cancel-edit") {
+      state.editing = false;
+      return showDetail();
+    }
+    if (a === "feedback") {
+      state.editingFeedback =
+        state.editingFeedback === b.dataset.value ? null : b.dataset.value;
+      detail
+        .querySelectorAll('[data-action="feedback"]')
+        .forEach((el) =>
+          el.setAttribute(
+            "aria-pressed",
+            String(el.dataset.value === state.editingFeedback),
+          ),
+        );
+      return;
+    }
+    if (a === "save-edit") {
+      await send("SAVE", {
+        note: {
+          ...n,
+          comment: document.getElementById("edit-comment").value,
+          feedback: state.editingFeedback,
+        },
+        revision: n.revision,
+      });
+      state.editing = false;
+      await reload();
+      await showDetail();
+      toast("已保存");
+      return;
+    }
+    if (a === "delete") {
+      state.deleting = n.id;
+      deletion.showModal();
+      return;
+    }
+    if (a === "keep") {
+      deletion.close();
+      return;
+    }
+    if (a === "confirm-delete") {
+      await send("DELETE", { id: state.deleting });
+      assets.delete(state.deleting);
+      deletion.close();
+      detail.close();
+      await reload();
+      toast("已删除");
+      return;
+    }
+    if (a === "enlarge") {
+      detail.classList.toggle("media-expanded");
+      return;
+    }
+    if (a === "retry-media") {
+      assets.delete(n.id);
+      return showDetail();
+    }
+    if (a === "seek") {
+      const video = detail.querySelector("video");
+      video.currentTime = assets.get(n.id).frames[Number(b.dataset.index)].at;
+      return video.play();
+    }
+    if (a === "copy-page") {
+      const fixed = await send("CREATE_HANDOFF", { pageUrl: n.url });
+      await copy(fixed.text);
+      return;
+    }
+    if (a === "conflict") {
+      state.remote = await send("CLOUD_REMOTE", { id: n.id });
+      return showDetail();
+    }
+    if (a === "fork") {
+      await send("CLOUD_FORK", { id: n.id });
+      assets.delete(n.id);
+      state.remote = null;
+      await reload();
+      return showDetail();
+    }
+    if (a === "login") {
+      await send("CLOUD_LOGIN");
+      await reload({ remote: true });
+      return settings();
+    }
+    if (a === "logout") {
+      await send("CLOUD_DISCONNECT");
+      return settings();
+    }
+    if (a === "restore-deleted") {
+      await send("CLOUD_RESTORE_DELETED", { id: b.dataset.id });
+      await reload();
+      return settings();
+    }
+    if (a === "sync") {
+      await send("CLOUD_SYNC");
+      await reload();
+      return settings();
+    }
+    if (a === "check") return settings();
+    if (a === "revoke") {
+      await send("CLOUD_REVOKE", { id: b.dataset.id });
+      return settings();
+    }
+    if (a === "copy-install")
+      return copy(
+        "curl -fsSL " + state.cloud.capabilities.installUrl + " | sh",
+      );
+    if (a === "copy-login")
+      return copy("page-review login --api " + state.cloud.apiUrl);
+  }
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-action]");
+    if (!b || state.busy) return;
+    state.busy = true;
+    b.disabled = true;
+    try {
+      await act(b);
+    } catch (e) {
+      toast(e.message);
+      if (access.open) {
+        const el = document.getElementById("settings-error");
+        if (el) el.textContent = e.message;
+      }
+    } finally {
+      state.busy = false;
+      if (b.isConnected) b.disabled = false;
+    }
   });
-  access.addEventListener('close', () => { state.once = null; });
-  detail.addEventListener('cancel', e => { if (state.editing) { e.preventDefault(); toast('请先保存或取消编辑'); } });
-  document.getElementById('cancel-delete').onclick = () => document.getElementById('delete-dialog').close();
-  document.getElementById('confirm-delete').onclick = async () => { try { await send('DELETE', { id: state.deleting }); pictures.delete(state.deleting); document.getElementById('delete-dialog').close(); await reload(); renderDetail(); } catch (e) { toast(e.message); } };
-  chrome.storage.onChanged?.addListener(changes => { if (changes.cloudSyncResult && !state.busy) reload().then(() => { for (const el of detail.querySelectorAll('[data-sync-label]')) { const note = state.notes.find(n => n.id === el.dataset.syncLabel); if (note) el.textContent = syncLabel(note); } }).catch(e => toast(e.message)); });
-  window.addEventListener('online', () => send('CLOUD_SYNC').then(reload).catch(e => toast(e.message)));
-  reload().catch(e => { app.textContent = e.message; });
+  document.getElementById("search").addEventListener("input", (e) => {
+    state.query = e.target.value;
+    render();
+  });
+  document
+    .getElementById("history-date")
+    .addEventListener("change", async (e) => {
+      state.date = e.target.value;
+      document.getElementById("custom-date").hidden = state.date !== "custom";
+      await reload({ remote: true });
+    });
+  for (const key of ["from", "to"])
+    document
+      .getElementById("date-" + key)
+      .addEventListener("change", async (e) => {
+        state[key] = e.target.value;
+        await reload({ remote: true });
+      });
+  detail.addEventListener("cancel", (e) => {
+    if (state.editing) {
+      e.preventDefault();
+      toast("请先保存或取消修改");
+    }
+  });
+  chrome.storage.onChanged?.addListener((changes) => {
+    if (changes.cloudSyncResult && !state.busy)
+      reload().catch((e) => toast(e.message));
+  });
+  window.addEventListener("online", () =>
+    send("CLOUD_SYNC")
+      .then(() => reload())
+      .catch((e) => toast(e.message)),
+  );
+  reload({ remote: true }).catch((e) => {
+    app.textContent = e.message;
+  });
 })();

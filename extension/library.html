@@ -1,19 +1,67 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>保存的网页 · Page Review</title>
-  <link rel="stylesheet" href="library.css">
-  <script src="core.js" defer></script>
-  <script src="library.js" defer></script>
-</head>
-<body>
-  <header class="workspace-header"><span class="workspace-brand"><span class="brand-mark">↗</span>网页评注 <span class="workspace-name">个人云空间</span></span><button class="btn" data-action="access" id="access-button">登录并开启同步</button></header>
-  <main id="app" class="library-shell"><div class="empty-state">正在读取保存的网页…</div></main>
-  <dialog id="detail-dialog" class="drawer" aria-label="网页评注详情"></dialog>
-  <dialog id="access-dialog" aria-label="AI访问设置"></dialog>
-  <dialog id="delete-dialog" aria-label="删除评注"><h2>删除这条评注？</h2><p>评论会从本机移除；已同步记录会排队从云资料库移除。</p><div class="dialog-actions"><button class="button btn" id="cancel-delete">保留</button><button class="button btn danger" id="confirm-delete">删除评注</button></div></dialog>
-  <div id="toast" role="status" aria-live="polite"></div>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>评注记录 · Page Review</title>
+    <link rel="stylesheet" href="library.css" />
+    <script src="core.js" defer></script>
+    <script src="library.js" defer></script>
+  </head>
+  <body>
+    <header class="workspace-header">
+      <strong>网页评注 <span>评注记录</span></strong
+      ><button class="icon-btn" data-action="settings" aria-label="连接设置">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.65"
+        >
+          <path d="M4 7h8m4 0h4M4 17h4m4 0h8" />
+          <circle cx="14" cy="7" r="2" />
+          <circle cx="10" cy="17" r="2" />
+        </svg>
+      </button>
+    </header>
+    <main class="library-shell">
+      <div class="history-filters">
+        <select id="history-date" aria-label="记录时间">
+          <option value="all">全部时间</option>
+          <option value="today">今天</option>
+          <option value="week">最近 7 天</option>
+          <option value="custom">自定义时间</option></select
+        ><input
+          id="search"
+          type="search"
+          aria-label="搜索网页或评注"
+          placeholder="搜索网页或评注"
+        />
+        <div id="custom-date" hidden>
+          <input
+            id="date-from"
+            type="datetime-local"
+            aria-label="开始时间"
+          /><span>至</span
+          ><input id="date-to" type="datetime-local" aria-label="结束时间" />
+        </div>
+      </div>
+      <p id="history-error" class="inline-error" role="alert" hidden></p>
+      <div class="history-count">
+        <span id="count"></span
+        ><button class="text-button" data-action="refresh">刷新</button>
+      </div>
+      <div id="app" class="history-list">正在读取…</div>
+    </main>
+    <dialog id="detail-dialog" class="drawer" aria-label="评注详情"></dialog>
+    <dialog id="access-dialog" aria-label="连接设置"></dialog>
+    <dialog id="delete-dialog">
+      <h2>删除这条评注？</h2>
+      <div class="dialog-actions">
+        <button class="btn" data-action="keep">保留</button
+        ><button class="btn danger" data-action="confirm-delete">删除</button>
+      </div>
+    </dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </body>
 </html>

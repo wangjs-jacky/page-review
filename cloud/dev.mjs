@@ -6,13 +6,15 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtime = await import(process.env.PAGE_REVIEW_MINIFLARE_MODULE || 'miniflare');
 const { Miniflare } = runtime;
-const options = { modules: true, scriptPath: path.join(root, 'cloud/worker.mjs'), compatibilityDate: '2026-10-19', host: '127.0.0.1', port: Number(process.env.PAGE_REVIEW_DEV_PORT || 8798), d1Databases: ['DB'], r2Buckets: ['FILES'], resourcePersistencePath: path.join(root, '.local/state') };
+const options = { modules: ['worker.mjs','login.mjs','handoff.mjs','distribution.mjs'].map(name=>({type:'ESModule',path:path.join(root,'cloud',name)})),modulesRoot:path.join(root,'cloud'), compatibilityDate: '2026-10-19', host: '127.0.0.1', port: Number(process.env.PAGE_REVIEW_DEV_PORT || 8798), d1Databases: ['DB'], r2Buckets: ['FILES'], resourcePersistencePath: path.join(root, '.local/state') };
 const mf = new Miniflare(runtime.convertV4MiniflareOptions ? runtime.convertV4MiniflareOptions(options) : options);
 await mf.ready;
 const db = await mf.getD1Database('DB');
 for (const statement of (await fs.readFile(path.join(root, 'cloud/migrations/0001.sql'), 'utf8')).split(';').map(x => x.trim()).filter(Boolean)) await db.prepare(statement).run();
 const columns=(await db.prepare('PRAGMA table_info(tokens)').all()).results;
 for(const statement of (await fs.readFile(path.join(root,'cloud/migrations/0002-login.sql'),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)){if(statement.startsWith('ALTER TABLE')&&columns.some(c=>c.name==='expires_at'))continue;await db.prepare(statement).run();}
+const loginColumns=(await db.prepare('PRAGMA table_info(login_requests)').all()).results;
+for(const statement of (await fs.readFile(path.join(root,'cloud/migrations/0003-handoff.sql'),'utf8')).split(';').map(x=>x.trim()).filter(Boolean)){if(statement.startsWith('ALTER TABLE')&&loginColumns.some(c=>c.name==='client_kind'))continue;await db.prepare(statement).run();}
 const file = path.join(root, '.local/owner.json'); let owner;
 try { owner = JSON.parse(await fs.readFile(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; owner = { apiUrl: (await mf.ready).origin, token: 'pr_' + randomBytes(32).toString('hex'), workspaceId: randomUUID() }; await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, JSON.stringify(owner, null, 2), { mode: 0o600, flag: 'wx' }); }
 await db.prepare('INSERT OR IGNORE INTO workspaces(id,created_at) VALUES(?,?)').bind(owner.workspaceId, new Date().toISOString()).run();

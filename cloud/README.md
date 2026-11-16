@@ -1,61 +1,64 @@
-# 私人云空间与Agent接入
+# 私人云空间与终端交接
 
-实现为个人资料服务：Chrome负责采集，Workers API负责鉴权与请求，D1保存元数据和凭证摘要，R2保存私有原画面和裁图。Agent在自己的宿主中运行，不由本服务托管。当前已部署真实Cloudflare服务，并用合成资料完成D1/R2保存、独立Skill检索/读图、断网恢复、隔离及撤销验收；原生Chrome安装与另一宿主自动发现仍待验证。
+Workers 负责鉴权与请求，D1 保存记录、固定清单和凭证摘要，`FILES` R2 保存私有附件。0.4.0增加区域视频和CLI交接；本工作树尚未将这些变化部署到线上。既有0.3.0账号登录部署的历史验收仍保持原范围。
 
-## 账号登录与一次性AI授权
+## 登录与授权
 
-在插件资料库点击“登录并开启同步”，通过已有统一身份服务的GitHub或Google登录，确认后自动分配自己的私人空间。同账号重登回到原空间；不同账号隔离，不按邮箱静默合并，不增加其他Paws应用权限。已有本机记录上传默认不选。API固定为https://review.paws.rodeo。
+扩展沿已有统一身份服务，以Chrome identity回跳和PKCE取得最多6小时的writer会话，且不晚于中央会话到期。新记录自动进入本机同步队列；未归属账号的旧记录不会自动上传，用户可“同步本页”。退出保留本机记录。
 
-插件使用chrome.identity及一次性码/PKCE接收短期写入会话，不再要求用户填写拥有者凭证。会话不晚于中央登录到期，最多6小时；退出Page Review撤销当前插件会话，重新登录可继续同步队列。本机记录仍保留。中央注销/停用尚未主动传播撤销到已签发的Page Review凭证，过期与应用内退出仍按上述规则执行。
+CLI仅支持macOS。`page-review login`在127.0.0.1随机端口接收浏览器回跳；state、PKCE和一次性码共同校验。`client=cli`仅允许严格的loopback回跳，交换得到reader，不能写评注或管理别人的连接。有效期最多30天且不晚于当前中央会话到期。凭证先以600权限落盘，再由执行机器提交连接回执；设置页通过用户动作检查回执，不轮询安装或登录状态。
 
-“AI访问设置”创建独立、可撤销的只读连接，保存首次配置JSON并放在Agent执行环境私有目录（权限600）。Agent按宿主规则安装agent-skills/page-review/，以PAGE_REVIEW_CONFIG指向该文件。随后按任务检索原话、反馈、历史和截图；无需逐次搬运阅读包。退出插件不会代替明确撤销Agent授权；已下载副本无法收回。另一宿主自动发现仍需分别验收。
+只读授权与插件会话分别撤销；中央注销暂未主动传播到已签发凭证。旧版创建的reader配置仍可由CLI `connect --from`私有导入，不要求在对话里粘贴密钥。
 
-旧手动拥有者空间不会自动合并到社交账号。若本机保留另一个空间的资料，插件会停止混合并要求先使用原账号处理。登录接入协议与中央路由见[integrations说明](../integrations/better-auth/README.md)。
+## 固定交接与附件
 
-## 接口
+复制前等待一次有界同步，检查本页尚未同步、冲突和待删除项；读取本页云端完整历史，并核对本机修订。服务端将当前页全部记录及附件引用保存为固定清单。复制文本只带清单ID和读取命令，不含长期凭证。
 
-| 方法 | 路径 | 权限与用途 |
+之后的修改不改变清单，旧附件由清单的授权路径读取；删除清单中的任一记录则整份清单返回410，授权撤销返回401。跨空间访问即使知道ID也返回404。CLI逐一下载附件、校验SHA-256，全部成功后才原子交付私有目录；缺图、损坏或传输中断不交付部分结果。历史快照不是实时DOM或可重放操作。
+
+PNG/JPEG每个最多8MB，WebM最多32MB；附件角色为viewport、crop、video和frame-0…frame-5。视频需要封面及对应关键帧。每次复制最多500条记录、500个去重附件及1.5MB元数据；超限明确失败，不静默截断。删除检查与资产元数据使用JSON表查询，避免按每条记录逐次访问D1；R2完整性检查最多同时5个请求。
+
+D1条件修订及幂等回执防止重复/过期覆盖。先上传R2并登记，再提交引用；未提交上传不可被普通资产接口读取。逻辑删除与物理清理分开，目前没有定期清理或生命周期任务，已下载副本不能收回。
+
+## 主要接口
+
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | /v1/me | 当前连接的workspace和权限，不返回凭证 |
-| GET | /v1/annotations | 已提交记录的q/domain/feedback筛选及不透明游标分页 |
-| GET | /v1/annotations/:id/context | 原话、明确反馈、采集状态、历史和受保护图片路径 |
-| GET | /v1/assets/:sha256 | 已提交且未删除记录引用的PNG/JPEG，private,no-store |
-| PUT | /v1/uploads/:sha256 | 拥有者上传，摘要与字节类型校验，上限8MB；暂存资源不可直接读 |
-| PUT / DELETE | /v1/annotations/:id | 拥有者提交或墓碑；requestId和expectedRevision必需 |
-| GET | /v1/annotations/:id | 拥有者读取原始云端修订以处理冲突 |
-| GET / POST | /v1/connections | 拥有者列出或创建只读连接；原密钥仅在创建响应出现一次 |
-| DELETE | /v1/connections/:id | 拥有者撤销只读连接 |
+| GET | /v1/me | 当前空间及reader/writer权限 |
+| GET | /v1/capabilities | 版本、交接及CLI分发是否真实就绪 |
+| GET | /v1/pages?url=… | writer读取当前规范化页的完整历史，上限500 |
+| GET | /v1/library?from=…&to=… | writer按时间回查，上限500，超限要求缩小时间范围 |
+| GET | /v1/annotations | 兼容已有检索与游标分页 |
+| GET | /v1/annotations/:id/context | 当前修订的文本和附件引用 |
+| PUT / DELETE | /v1/annotations/:id | writer提交及墓碑，需要预期修订和幂等ID |
+| PUT | /v1/uploads/:sha256 | writer上传并校验摘要和类型 |
+| GET | /v1/assets/:sha256 | 当前未删除记录引用的私有附件 |
+| POST | /v1/cli/confirm | reader在执行机器保存配置后确认连接 |
+| GET | /v1/cli/connections | writer读取已确认机器，不返回凭证 |
+| POST | /v1/handoffs | writer生成本页固定清单 |
+| GET | /v1/handoffs/:id | 同空间授权读取固定清单，删除后410 |
+| GET | /v1/handoffs/:id/assets/:sha256 | 限本清单的不可变私有附件 |
+| GET / POST / DELETE | /v1/connections[/:id] | writer兼容管理与撤销reader |
+| DELETE | /v1/session | 当前凭证自行退出与撤销 |
 
-workspace从凭证确定，不接收客户端owner选择。D1事务同时保存条件修订和幂等回执；相同requestId的不同内容被拒绝。附件先写R2、登记D1，再提交引用；断在上传阶段的图片不向Agent开放。R2和D1不是跨产品原子事务，暂存/墓碑对象可能保留；当前没有实现物理清理或生命周期任务，也不承诺删除后物理立即擦除。
+## macOS CLI分发
 
-本地outbox与评论事务入库。每个真实事件处理至多100项快照，失败不自行定时查询或自动退避，等待下一次启动/在线/用户操作。编辑不覆盖历史图；明确无图保存携带缺图状态。两端修改冲突不自动覆盖，可比较原话后另存本机意见；删除遇到云端新修订仍保留队列，不自动删除未知内容。当前不是完整的双向同步/新设备恢复方案。
+独立可选 `RELEASES` R2绑定仅保存公开CLI制品，不能复用私人 `FILES`。构建产物原样放入该绑定，路径保持 `dist/cli/` 中的结构：`install.sh`、`releases/0.4.0/manifest.json`、两个架构tar.gz及`SHA256SUMS`。
 
-## 自部署与旧拥有者工具
+Worker只有在manifest和所有制品存在时才将 `cliAvailable` 设为true，并开放 `/install.sh` 与白名单版本文件。未配置或缺文件时返回503，界面不显示虚构的可安装入口。无需暴露R2桶。安装器使用HTTPS、检查SHA-256、安装到用户 `~/.local/bin`，不使用sudo、Node或npx；不轮询自动更新。CLI版本由构建固定，不下载任意latest地址。
 
-配置模板cloud/wrangler.jsonc不含账户和凭证；database_id需用真实创建结果替换。若只有workers_scripts授权，D1请求会拒绝，不能拿Worker上传成功替代存储权限。
+## 部署准备
 
-1. 在目标账户准备Workers、D1与R2权限，沿已启用套餐处理；没有授权不购买或升级。只创建本项目独立资源，保留其他应用。
-2. 使用Wrangler创建page-review-cloud数据库及page-review-cloud-files私有桶。复制配置到被忽略的.local/，填入真实database_id、账户和正确相对入口路径；也可先在原模板填真实非秘密资源ID再按项目政策管理。不要将R2设为公有。
-3. 对指定数据库按顺序初始化cloud/migrations/0001.sql及0002-login.sql，部署Worker并读回实际API源地址、活动版本与绑定。遵守禁止轮询约束时使用D1单次query请求；本次缓存Wrangler的execute --file路径内部含轮询，不要使用。
-4. 运行下面的初始化脚本，在私有目录生成拥有者连接和仅含摘要的SQL。读取owner-seed.sql的hash-only内容，用D1单次query请求执行；raw token不进入命令参数或SQL，也不进入安装包。
+本说明不是部署授权。先复核现有账户、D1和R2绑定及回滚版本，再依次应用 `0001.sql`、`0002-login.sql`、`0003-handoff.sql`；已有环境仅执行缺失迁移。迁移不是无条件重复可运行的ALTER TABLE，先核对列。本工程的登录桥适配源码已补充只读授权页面及loopback回跳校验。CLI上线前需同步该适配更新；本轮没有修改或部署中央认证应用，不需要另建OAuth注册。旧版仅允许Chrome回跳的适配器不能直接承接CLI。
 
-```sh
-node cloud/provision-owner.mjs https://your-api.example .local/production
-```
+遵守禁止轮询约束，使用D1单次SQL请求；不要使用已知内部轮询的Wrangler文件导入路径。新服务部署后核对健康版本、登录回跳、同步、视频、固定交接、独立CLI、撤销及删除；公开健康200不能替代业务验收。CLI公开分发还需按产品发布流程处理签名、公证及下载入口。
 
-5. 用实际API源构建插件，先用合成资料验证：上传并提交 → 卸载测试页面 → 独立进程检索/读图 → 撤销拒绝元数据与图片 → 断网恢复及重复提交。然后再由用户选择是否迁移真实本机资料。
-
-以下初始化脚本只服务旧拥有者空间及运维，不是普通用户登录步骤。初始化脚本不自动创建或部署资源；已有文件会拒绝覆盖。数据库迁移幂等且不删除旧记录。0.3.0以账号登录预发布包分发，构建精确放行实际服务源。旧版更新仍保留原插件目录及身份，不先卸载；真实旧记录不会自动迁移。
-
-## 本机验证
-
-已有Miniflare时：
+本机有Miniflare时可运行持久云开发服务 `cloud/dev.mjs`。完整合成集成环境使用：
 
 ```sh
-PAGE_REVIEW_MINIFLARE_MODULE=file:///absolute/path/to/miniflare/dist/src/index.js PAGE_REVIEW_DEV_PORT=18881 node cloud/dev.mjs
-PAGE_REVIEW_CLOUD_DEV_URL=http://127.0.0.1:18881 node scripts/fixtures.mjs --port 18880
+PAGE_REVIEW_MINIFLARE_MODULE=file:///absolute/path/to/miniflare/dist/src/index.js node tests/browser/server.mjs
 ```
 
-本机服务使用实际workerd及持久D1/R2；测试凭证和数据只保存在.gitignore覆盖的.local/，不输出密钥。测试页面代理只在scripts/fixtures.mjs，不进入插件或Worker。不要把该带认证头的开发代理公开为静态预览。
+该环境只监听127.0.0.1，使用独立合成空间；凭证仅在忽略的.local中，不进入日志、安装包或公开预览。Chrome权限与录制输入是测试适配，不把它当原生采集证明。
 
-官方依据：[D1批事务](https://developers.cloudflare.com/d1/worker-api/d1-database/)、[R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-usage/)。套餐与实际费用在真实部署前按账户核实。
+官方资料：[Chrome tabCapture](https://developer.chrome.com/docs/extensions/reference/api/tabCapture)、[D1限制](https://developers.cloudflare.com/d1/platform/limits/)、[Workers限制](https://developers.cloudflare.com/workers/platform/limits/)、[Bun自包含可执行文件](https://bun.sh/docs/compiler/executables)。产品自身的上限与平台额度分别处理。
