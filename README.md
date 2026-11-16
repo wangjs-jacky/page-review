@@ -2,7 +2,7 @@
 
 在原网页点选、框选或评论整页，附上截图或区域视频。保存后点击“复制本页评注”，粘贴给终端 Agent；它通过独立只读 CLI 获取本页全部已保存评注和附件，无需先打开资料库。
 
-当前工作树是 **0.4.0 候选版**，基于 0.3.0 账号登录版本。新 API、数据库迁移和 CLI 分发尚未正式部署；0.3.0 的线上版本不代表已具备这些能力。
+当前扩展版本为 **0.4.0 预发布版**。配套云 API、数据库迁移、终端只读授权与 macOS CLI HTTPS 分发已部署；真实云端保存、复制及独立 CLI 读取已验证。完整原生 Chrome 截图和 tabCapture 采集仍须分别验收，不能用媒体适配测试代替。
 
 ## 使用流程
 
@@ -25,7 +25,14 @@ npm run build
 
 默认 API 为 `https://review.paws.rodeo`；自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.0.zip` 是安装候选包。更新已有安装时保留原目录及扩展身份；不要先卸载丢失本机资料。
 
-CLI 为自包含 macOS arm64/x64 可执行文件，用户无需安装 Node、Bun 或 npx。开发构建需要已有 Bun：
+CLI 为自包含 macOS arm64/x64 可执行文件，用户无需安装 Node、Bun 或 npx。用户安装及授权：
+
+```sh
+curl -fsSL https://review.paws.rodeo/install.sh | sh
+~/.local/bin/page-review login
+```
+
+开发构建需要已有 Bun：
 
 ```sh
 PAGE_REVIEW_BUN=/absolute/path/to/bun npm run build:cli

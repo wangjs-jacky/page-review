@@ -16,6 +16,10 @@
     {
       "binding": "FILES",
       "bucket_name": "page-review-cloud-files"
+    },
+    {
+      "binding": "RELEASES",
+      "bucket_name": "page-review-cli-releases"
     }
   ],
   "observability": {

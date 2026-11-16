@@ -26,8 +26,8 @@ app.use((req, res, next) => originOf(req) === loginOrigin
 
 部署前保存原服务入口和源码摘要，在独立worktree完成测试。实际切换仅添加两个模块和服务端注册行，核对原文件摘要没有并发变化后应用；保留原数据库、OAuth配置及其他应用路由，按原服务启动入口重启。回退移除新增注册行及模块并恢复先前Worker版本，不删数据。
 
-## 0.4.0 候选：终端只读授权
+## 0.4.0：终端只读授权
 
 本工程内的适配源码增加了CLI路径。确认页通过Worker的`/auth/request`读取真实权限，不信任客户端的权限提示；`/auth/approve`返回的reader权限与严格loopback地址共同决定是否允许终端回跳。Chrome插件回跳继续保留。
 
-上线时先部署对应Worker与迁移，再同步此桥接适配；旧版只允许chromiumapp.org的适配器会拒绝CLI回跳。本轮没有修改或部署中央认证实例，无需新建GitHub/Google OAuth注册。
+上线时先部署对应Worker与迁移，再同步此桥接适配；旧版只允许chromiumapp.org的适配器会拒绝CLI回跳。本次已同步该适配并沿既有入口重启网关；原OAuth配置、账号及其他应用路由保留，无需新建GitHub/Google OAuth注册。
