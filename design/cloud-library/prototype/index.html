@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'"><title>Page Review · 云资料库设计</title><link rel="stylesheet" href="base.css"><link rel="stylesheet" href="styles.css"><script src="app.js" defer></script></head>
+<body>
+<div class="review-bar"><span>交互稿 · 云同步、连接与 Agent 调用均为模拟</span><div><button data-action="network">模拟离线</button><button data-action="agent-demo">演示 Agent 读取</button></div></div>
+<header class="workspace-header"><a class="workspace-brand" href="#"><span class="brand-mark">↗</span>网页评注 <span class="workspace-name">个人云空间</span></a><button class="btn" data-action="connections" id="connection-button">连接 AI</button></header>
+<main class="library-shell"><div class="cloud-heading"><div><h1>我的网页资料库</h1><p>浏览时留下的评论、赞踩和画面，都在这里。</p></div><label class="search-field"><span id="search-icon"></span><input id="search" type="search" aria-label="搜索资料" placeholder="搜索网页或评论"></label></div><div class="cloud-status" id="sync-status" role="status"></div><div class="library-tools"><div class="filter-tabs" id="filters"></div><button class="text-button" data-action="connections">管理 AI 访问 →</button></div><div class="library-grid" id="cards"></div><div class="library-note">资料保存在你的私人空间，已授权的 Agent 可按需读取。</div></main>
+<dialog id="connections" aria-label="AI 访问设置"></dialog>
+<dialog id="sheet" class="drawer" aria-label="资料详情"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+</body></html>
