@@ -73,7 +73,11 @@ fi
 [ "$(tar -tzf "$archive")" = page-review ] || { echo '安装包内容无效，未安装' >&2; exit 1; }
 tar -xzf "$archive" -C "$work"
 [ -f "$work/page-review" ] && [ ! -L "$work/page-review" ] || exit 1
-[ "$("$work/page-review" --version </dev/null)" = "$version" ] || { echo 'CLI版本校验失败，未安装' >&2; exit 1; }
+if ! candidate_version=$("$work/page-review" --version </dev/null); then
+  echo 'CLI版本命令未正常退出，原CLI未改动' >&2
+  exit 1
+fi
+[ "$candidate_version" = "$version" ] || { echo 'CLI版本校验失败，未安装' >&2; exit 1; }
 install_dir="${PAGE_REVIEW_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$install_dir"
 staging=$(mktemp "$install_dir/.page-review.XXXXXX")

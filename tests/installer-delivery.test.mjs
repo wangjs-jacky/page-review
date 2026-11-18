@@ -14,7 +14,7 @@ test('真实HTTPS轻量安装：中断保留旧版、再次运行206续传、完
   let archive;try{archive=await fs.readFile(path.join(root,'dist/cli/releases/0.4.2/page-review-node.tar.gz'))}catch{return t.skip('先运行build:cli:light')}
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'page-review-light-install-')),cert=path.join(dir,'cert.pem'),key=path.join(dir,'key.pem');
   await exec('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',key,'-out',cert,'-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1']);await fs.chmod(key,0o600);
-  const sha=createHash('sha256').update(archive).digest('hex'),requests=[];let base,cut=true,bad=false,stall=false;
+  const requests=[];let sha=createHash('sha256').update(archive).digest('hex'),base,cut=true,bad=false,stall=false;
   const server=https.createServer({key:await fs.readFile(key),cert:await fs.readFile(cert)},async(req,res)=>{
     requests.push({url:req.url,range:req.headers.range});
     if(req.url==='/install.sh'){res.end((await fs.readFile(path.join(root,'cli/install.sh'),'utf8')).replace('__API_ORIGIN__',base));return}
@@ -39,6 +39,7 @@ test('真实HTTPS轻量安装：中断保留旧版、再次运行206续传、完
     const downloads=()=>requests.filter(x=>x.url.endsWith('.tar.gz')).length,before=downloads(),cached=await run();assert.match(cached.stderr,/完整缓存/);assert.equal(downloads(),before);
     const installed=await fs.readFile(binary);bad=true;await assert.rejects(run(),e=>/校验失败/.test(e.stderr));assert((await fs.readFile(binary)).equals(installed));assert.equal(await fs.readFile(config,'utf8'),'preserve-connection');bad=false;
     stall=true;const start=performance.now();await assert.rejects(run({PAGE_REVIEW_CACHE_DIR:path.join(dir,'stall-cache'),PAGE_REVIEW_DOWNLOAD_TIMEOUT:'1'}),e=>/下载未完成/.test(e.stderr));assert(performance.now()-start<6000);assert((await fs.readFile(binary)).equals(installed));
-    console.log(JSON.stringify({archiveBytes:archive.length,interruptionProtected:true,resume206:true,cacheReuse:true,shaFailureProtected:true,timeoutBounded:true,connectionPreserved:true}));
+    stall=false;const invalidDir=path.join(dir,'bad-version');await fs.mkdir(invalidDir);await fs.writeFile(path.join(invalidDir,'page-review'),'#!/usr/bin/env node\nconsole.log("0.4.2");process.exit(7);\n',{mode:0o755});await exec('/usr/bin/tar',['-czf',path.join(dir,'bad-version.tar.gz'),'-C',invalidDir,'page-review']);const originalBytes=archive.length;archive=await fs.readFile(path.join(dir,'bad-version.tar.gz'));sha=createHash('sha256').update(archive).digest('hex');await assert.rejects(run(),e=>/版本命令未正常退出/.test(e.stderr));assert((await fs.readFile(binary)).equals(installed));
+    console.log(JSON.stringify({archiveBytes:originalBytes,interruptionProtected:true,resume206:true,cacheReuse:true,shaFailureProtected:true,timeoutBounded:true,nonzeroVersionRejected:true,connectionPreserved:true}));
   }finally{server.closeAllConnections();await new Promise(r=>server.close(r));await fs.rm(dir,{recursive:true,force:true})}
 });
