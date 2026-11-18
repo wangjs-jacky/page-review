@@ -1570,6 +1570,10 @@ h3 {
   justify-content: space-between;
   align-items: center;
 }
+.drawer-footer .copy-region {
+  width: min(360px, 75%);
+  padding: 0;
+}
 .media-view {
   width: min(1000px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);

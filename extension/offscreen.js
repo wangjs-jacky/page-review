@@ -15,7 +15,7 @@ async function start(message) {
   if (recording) throw Error("已有录制正在进行");
   const { streamId, rect, viewport, pageUrl, tabId } = message;
   PageReviewMedia.region(rect, viewport);
-  let stream, canvasStream;
+  let stream, canvasStream, pipeline;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -23,30 +23,27 @@ async function start(message) {
         mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId },
       },
     });
-    const video = document.createElement("video");
-    video.muted = true;
-    video.srcObject = stream;
-    await video.play();
-    const crop = PageReviewMedia.crop(
-        rect,
-        viewport,
-        video.videoWidth,
-        video.videoHeight,
-      ),
+    if (typeof MediaStreamTrackProcessor !== "function" ||
+        typeof MediaStreamTrackGenerator !== "function")
+      throw Error("当前浏览器不支持区域录制");
+    const processor = new MediaStreamTrackProcessor({ track: stream.getVideoTracks()[0] }),
+      generator = new MediaStreamTrackGenerator({ kind: "video" }),
       canvas = document.createElement("canvas");
-    canvas.width = crop.width;
-    canvas.height = crop.height;
     const ctx = canvas.getContext("2d", { alpha: false }),
       frames = [],
       chunks = [];
     let bytes = 0,
-      frameId,
       limit,
       started = performance.now(),
       stopping = false;
-    function draw() {
+    function draw(frame) {
+      const crop = PageReviewMedia.crop(rect, viewport, frame.displayWidth, frame.displayHeight);
+      if (!frames.length) {
+        canvas.width = crop.width;
+        canvas.height = crop.height;
+      }
       ctx.drawImage(
-        video,
+        frame,
         crop.x,
         crop.y,
         crop.width,
@@ -65,10 +62,10 @@ async function start(message) {
           at: (performance.now() - started) / 1000,
           data: canvas.toDataURL("image/jpeg", 0.85),
         });
-      if (!stopping) frameId = video.requestVideoFrameCallback(draw);
     }
-    draw();
-    canvasStream = canvas.captureStream(24);
+    // Offscreen documents have no presented video frames. Consume the actual
+    // track's frame events and feed a generated track; no display clock or timer.
+    canvasStream = new MediaStream([generator]);
     const mime = [
       "video/webm;codecs=vp9",
       "video/webm;codecs=vp8",
@@ -87,10 +84,9 @@ async function start(message) {
     stopped.catch(() => {});
     const cleanup = () => {
       clearTimeout(limit);
-      video.cancelVideoFrameCallback(frameId);
+      pipeline?.abort();
       for (const t of [...stream.getTracks(), ...canvasStream.getTracks()])
         t.stop();
-      video.srcObject = null;
       recording = null;
     };
     const stop = (reason) => {
@@ -117,7 +113,7 @@ async function start(message) {
       try {
         const duration = Math.min(120, (performance.now() - started) / 1000),
           blob = new Blob(chunks, { type: "video/webm" });
-        if (!blob.size || blob.size > 32000000 || duration < 0.15)
+        if (!frames.length || !blob.size || blob.size > 32000000 || duration < 0.15)
           throw Error("录制为空或超出大小限制，请重录");
         const final = {
           at: Math.max(0, duration - 0.02),
@@ -170,10 +166,32 @@ async function start(message) {
         once: true,
       });
     recorder.start(1000);
+    pipeline = new AbortController();
+    processor.readable.pipeThrough(new TransformStream({
+      transform(frame, controller) {
+        let output;
+        try {
+          if (stopping) return;
+          draw(frame);
+          output = new VideoFrame(canvas, { timestamp: frame.timestamp });
+          controller.enqueue(output);
+          output = null;
+        } finally {
+          output?.close();
+          frame.close();
+        }
+      },
+    })).pipeTo(generator.writable, { signal: pipeline.signal }).catch((error) => {
+      if (!stopping) {
+        console.error("Page Review frame pipeline", error.name, error.message);
+        stop("录制已中断，保留已录部分").catch(() => {});
+      }
+    });
     limit = setTimeout(() => stop("已达到两分钟上限"), 120000);
     await notify("STARTED", { tabId, pageUrl });
     return { recording: true };
   } catch (e) {
+    pipeline?.abort();
     for (const t of [
       ...(stream?.getTracks() || []),
       ...(canvasStream?.getTracks() || []),

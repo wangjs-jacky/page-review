@@ -8,6 +8,7 @@
     identity = root.chrome?.identity,
   }) {
     let chain = Promise.resolve();
+    const failure = (message, code) => Object.assign(new Error(message), { code });
     const config = async () =>
       (await storage.get("cloudConnection")).cloudConnection || null;
     const workspace = async () => (await config())?.workspaceId;
@@ -42,6 +43,7 @@
             : error.message,
         );
         Object.assign(e, error, { status: response.status });
+        if (response.status === 401) e.code = "login_required";
         throw e;
       }
       return binary ? response : response.json();
@@ -101,9 +103,7 @@
               n.cloud?.workspaceId && n.cloud.workspaceId !== who.workspaceId,
           ))
       )
-        throw new Error(
-          "此浏览器保留了另一个账号的资料，请先使用原账号处理，未混合或上传这些记录",
-        );
+        throw failure("请登录保存这些评注的账号", "account_mismatch");
       await storage.set({
         cloudConnection: {
           ...proposed,
@@ -213,7 +213,7 @@
       }
       return refs;
     }
-    async function runBatch() {
+    async function runBatch({ page, strict = false } = {}) {
       const c = await config();
       if (
         !c ||
@@ -222,17 +222,26 @@
         (c.expiresAt && Date.parse(c.expiresAt) <= Date.now())
       )
         return status();
-      const entries = (await db.pending(c.workspaceId)).slice(0, 100);
+      // A page copy consumes one complete, finite snapshot, not a queue poll.
+      const pending = await db.pending(c.workspaceId);
+      const entries = page
+        ? pending.filter((entry) => entry.note.pageId === page)
+        : pending.slice(0, 100);
       let synced = 0,
-        failed = 0;
+        failed = 0,
+        firstError;
       for (const entry of entries) {
         if (entry.conflict) {
           failed++;
+          firstError ||= failure("评注有更新，请先处理冲突", "revision_conflict");
           continue;
         }
         try {
           const image =
             entry.kind === "delete" ? null : await db.asset(entry.id);
+          if (entry.kind !== "delete" && entry.note.hasImage && !image &&
+              !entry.note.cloud?.assets?.length)
+            throw failure("附件读取失败", "asset_unavailable");
           const assets =
             entry.kind === "delete"
               ? []
@@ -254,19 +263,24 @@
         } catch (error) {
           await db.markFailure(entry, error);
           failed++;
+          firstError ||= error;
           if ([401, 403].includes(error.status) || !error.status) break;
         }
       }
       await storage.set({
         cloudSyncResult: { at: new Date().toISOString(), synced, failed },
       });
+      if (strict && firstError) throw firstError;
       return status();
     }
     // One finite batch per actual save/startup/online/manual event; no timer or query loop.
-    function sync() {
-      const work = chain.catch(() => {}).then(runBatch);
+    function queued(operation) {
+      const work = chain.catch(() => {}).then(operation);
       chain = work;
       return work;
+    }
+    function sync(options = {}) {
+      return queued(() => runBatch(options));
     }
     async function disconnect() {
       await chain.catch(() => {});
@@ -433,27 +447,34 @@
       await db.restoreDeleted(entry, record);
       return status();
     }
-    async function enrollPage(page) {
+    async function preparePage(page) {
       const c = await config();
       if (!c) throw Error("请先登录");
-      for (const note of await db.list(page)) {
-        if (note.cloud?.workspaceId && note.cloud.workspaceId !== c.workspaceId)
-          throw Error("本页保留了另一个账号的记录");
+      const notes = await db.list(page);
+      if (notes.some((n) => n.cloud?.workspaceId && n.cloud.workspaceId !== c.workspaceId))
+        throw failure("请登录保存这些评注的账号", "account_mismatch");
+      for (const note of notes) {
         if (!note.cloud?.workspaceId)
           await db.patch(note.id, (n) => ({ ...n }), c.workspaceId);
       }
-      return sync();
+      return runBatch({ page, strict: true });
     }
-    async function handoff(page) {
-      await sync();
-      await chain.catch(() => {});
+    function handoff(page) {
+      return queued(() => prepareHandoff(page));
+    }
+    async function prepareHandoff(page) {
       const c = await config(),
         st = await status();
-      if (!st.configured) throw Error("请先登录账号");
+      if (!st.configured) throw failure("请登录账号", "login_required");
+      await preparePage(page);
+      if (!(await status()).configured)
+        throw failure("请登录账号", "login_required");
+      if ((await config())?.token !== c.token)
+        throw failure("账号已变化，请重新复制", "account_mismatch");
       await refreshPage(page);
       const notes = await db.list(page);
       if (notes.some((n) => n.cloud?.workspaceId !== c.workspaceId))
-        throw Error("本页有仅保存在本机的评注，请先同步本页");
+        throw failure("请登录保存这些评注的账号", "account_mismatch");
       if (
         notes.some(
           (n) =>
@@ -462,7 +483,7 @@
         ) ||
         (await db.pending(c.workspaceId)).some((n) => n.note.pageId === page)
       )
-        throw Error("本页评注尚未完整同步，请在设置中重试");
+        throw failure("评注有变化，请重试", "page_changed");
       const fixed = await request(c, "/v1/handoffs", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -490,7 +511,6 @@
       refreshPage,
       asset,
       setup,
-      enrollPage,
       handoff,
       status,
       workspace,

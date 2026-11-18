@@ -66,6 +66,8 @@
   const state = {
     cloud: null,
     copying: false,
+    copyIssue: null,
+    copyResumePanel: null,
     record: null,
     mediaBack: null,
     confirm: null,
@@ -86,7 +88,9 @@
   async function send(type, payload = {}) {
     const result = await chrome.runtime.sendMessage({ type, ...payload });
     if (!result?.ok)
-      throw new Error(result?.error || "插件已更新，请刷新网页后继续");
+      throw Object.assign(new Error(result?.error || "插件已更新，请刷新网页后继续"), {
+        code: result?.code,
+      });
     return result.value;
   }
   const own = (event) => Boolean(host && event.composedPath().includes(host));
@@ -658,7 +662,11 @@
     const c = state.cloud || {},
       ready = c.cliConnections?.length,
       cap = c.capabilities;
-    return `<section class="panel setup-panel" role="dialog" aria-label="连接设置">${panelHead("连接设置")}<div class="setup-body">${!c.configured ? '<button class="btn primary full" data-action="login">登录账号</button>' : `<div class="setup-account">${esc(c.name || "已登录")}<span class="connected-dot">●</span></div>${ready ? `<div class="setup-connected"><strong>终端已连接</strong>${c.cliConnections.map((n) => `<span>${esc(n.device_name)}</span>`).join("")}</div>` : `${cap?.cliAvailable ? '<button class="btn primary full" data-action="copy-install">复制 macOS 安装命令</button><button class="btn full" data-action="copy-login">复制终端登录命令</button>' : `<p class="muted">${cap ? "终端安装包尚未发布" : "服务需要更新，暂不能连接终端"}</p>`}`}<button class="text-button" data-action="check-connection">检查连接</button><button class="text-button" data-action="sync-page">同步本页</button>`}<button class="text-button" data-action="library">管理账号与连接 ${icon("arrow")}</button></div></section>`;
+    return `<section class="panel setup-panel" role="dialog" aria-label="连接设置">${panelHead("连接设置")}<div class="setup-body">${!c.configured ? '<button class="btn primary full" data-action="login">登录账号</button>' : `<div class="setup-account">${esc(c.name || "已登录")}<span class="connected-dot">●</span></div>${ready ? `<div class="setup-connected"><strong>终端已连接</strong>${c.cliConnections.map((n) => `<span>${esc(n.device_name)}</span>`).join("")}</div>` : `${cap?.cliAvailable ? '<button class="btn primary full" data-action="copy-install">复制 macOS 安装命令</button><button class="btn full" data-action="copy-login">复制终端登录命令</button>' : `<p class="muted">${cap ? "终端安装包尚未发布" : "服务需要更新，暂不能连接终端"}</p>`}`}<button class="text-button" data-action="check-connection">检查连接</button>`}<button class="text-button" data-action="library">管理账号与连接 ${icon("arrow")}</button></div></section>`;
+  }
+  function copyMarkup() {
+    const issue = state.copyIssue;
+    return `<div class="copy-region"><button class="btn primary copy-main" data-action="copy" ${state.copying ? "disabled" : ""}>${icon("copy")}${state.copying ? "正在准备…" : "复制本页评注"}</button>${issue ? `<p class="inline-error" role="alert">${esc(issue.message)}<button class="text-button" data-action="${issue.action}" ${state.copying ? "disabled" : ""}>${issue.label}</button></p>` : ""}</div>`;
   }
   function renderPanel(focus = false) {
     if (!shadow) return;
@@ -677,12 +685,12 @@
         )
         .join(
           "",
-        )}</div><button class="page-link" data-action="notes"><span>${icon("note")}本页评注</span><span>${state.notes.length}${icon("arrow")}</span></button><div class="copy-region"><button class="btn primary copy-main" data-action="copy" ${state.copying ? "disabled" : ""}>${icon("copy")}${state.copying ? "正在准备…" : "复制本页评注"}</button>${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}<button class="text-button" data-action="sync-page">重试</button></p>` : ""}</div><footer class="menu-footer"><button data-action="library">${icon("history")}历史记录</button><button class="icon-btn" data-action="markers" aria-label="${state.showMarkers ? "隐藏" : "显示"}页面标记" aria-pressed="${state.showMarkers}">${icon("eye")}</button></footer></section>`;
+        )}</div><button class="page-link" data-action="notes"><span>${icon("note")}本页评注</span><span>${state.notes.length}${icon("arrow")}</span></button>${copyMarkup()}<footer class="menu-footer"><button data-action="library">${icon("history")}历史记录</button><button class="icon-btn" data-action="markers" aria-label="${state.showMarkers ? "隐藏" : "显示"}页面标记" aria-pressed="${state.showMarkers}">${icon("eye")}</button></footer></section>`;
     else if (state.panel === "settings") html = connectionMarkup();
     else if (state.panel === "editor" && d)
       html = `<section class="panel editor popover v4-composer" role="dialog" aria-label="添加评注" aria-busy="${state.busy}"><header class="popover-head"><span>${esc(d.note.label || "评注")}</span><button class="icon-btn" data-action="cancel-draft" aria-label="取消评注">${icon("close")}</button></header>${d.note.id ? "" : draftMedia(d)}<textarea id="review-comment" aria-label="评注内容" placeholder="添加评注…" maxlength="12000">${esc(d.note.comment)}</textarea>${d.error && d.asset ? `<p class="inline-error" role="alert">${esc(d.error)}</p>` : ""}<footer class="composer-bottom"><div class="feedback-actions">${["positive", "negative"].map((v) => `<button class="feedback-button" data-action="feedback" data-feedback="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${d.note.feedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}</div><button class="btn primary composer-submit" data-action="save">保存</button></footer></section>`;
     else if (state.panel === "notes")
-      html = `<div class="drawer-backdrop" data-action="minimize"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="本页评注"><header class="drawer-head"><h2>本页评注</h2><button class="icon-btn" data-action="minimize" aria-label="关闭本页评注">${icon("close")}</button></header><div class="drawer-content">${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}</p>` : ""}${state.notes.length ? state.notes.map((n, i) => `<article class="drawer-note"><div class="saved-head"><span>${feedbackMarkup(n)}${esc(n.label)}</span><time>${date(n.createdAt)}</time></div><p>${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${n.id}">${n.hasVideo ? "播放录制" : n.hasImage ? "查看截图" : "查看评注"}</button><button data-action="edit" data-id="${n.id}">修改</button><button data-action="locate" data-id="${n.id}">定位</button><button data-action="delete" data-id="${n.id}">删除</button></div></article>`).join("") : '<div class="empty-state">本页还没有评注</div>'}</div><footer class="drawer-footer"><span>${state.notes.length} 条</span><button class="btn primary" data-action="copy">复制本页评注</button></footer></aside>`;
+      html = `<div class="drawer-backdrop" data-action="minimize"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="本页评注"><header class="drawer-head"><h2>本页评注</h2><button class="icon-btn" data-action="minimize" aria-label="关闭本页评注">${icon("close")}</button></header><div class="drawer-content">${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}</p>` : ""}${state.notes.length ? state.notes.map((n, i) => `<article class="drawer-note"><div class="saved-head"><span>${feedbackMarkup(n)}${esc(n.label)}</span><time>${date(n.createdAt)}</time></div><p>${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${n.id}">${n.hasVideo ? "播放录制" : n.hasImage ? "查看截图" : "查看评注"}</button><button data-action="edit" data-id="${n.id}">修改</button><button data-action="locate" data-id="${n.id}">定位</button><button data-action="delete" data-id="${n.id}">删除</button></div></article>`).join("") : '<div class="empty-state">本页还没有评注</div>'}</div><footer class="drawer-footer"><span>${state.notes.length} 条</span>${copyMarkup()}</footer></aside>`;
     else if (state.panel === "peek" && state.peek) {
       const n = state.notes.find((n) => n.id === state.peek.id),
         a = state.peek.asset;
@@ -1028,6 +1036,12 @@
           break;
         case "check-connection":
           state.cloud = await send("CLOUD_SETUP");
+          if (state.cloud.cliConnections?.length && state.copyResumePanel) {
+            state.panel = state.copyResumePanel;
+            state.copyResumePanel = null;
+            await copyPage();
+            break;
+          }
           renderPanel();
           toast(
             state.cloud.cliConnections?.length
@@ -1035,11 +1049,14 @@
               : "尚未收到终端连接",
           );
           break;
-        case "sync-page":
-          await send("SYNC_PAGE");
-          await refreshPageState();
+        case "login-copy":
+          await copyPage({ login: true });
+          break;
+        case "connect-terminal":
+          state.copyResumePanel = state.panel;
+          state.cloud = await send("CLOUD_SETUP");
+          state.panel = "settings";
           renderPanel();
-          toast("本页同步已完成");
           break;
         case "copy-install":
           await clipboard(
@@ -1488,16 +1505,20 @@
     }
     await loadNotes();
   }
-  async function copyPage() {
+  async function copyPage({ login = false } = {}) {
     if (state.copying) return;
     if (state.draft || state.record) {
       toast("请先保存当前评注");
       return;
     }
     state.copying = true;
+    state.copyIssue = null;
+    state.pageError = "";
     renderPanel();
     try {
+      if (login) await send("CLOUD_LOGIN");
       const fixed = await send("CREATE_HANDOFF");
+      await loadNotes();
       state.copyText = fixed.text;
       try {
         await clipboard(fixed.text);
@@ -1506,11 +1527,17 @@
         state.panel = "copy-fallback";
       }
     } catch (e) {
-      state.cloud = await send("CLOUD_SETUP").catch(() => null);
-      if (!state.cloud?.configured || !state.cloud.cliConnections?.length)
-        state.panel = "settings";
-      toast(e.message);
-      state.pageError = e.message;
+      const actions = {
+        login_required: { message: "尚未登录", action: "login-copy", label: "登录并复制" },
+        account_mismatch: { message: "账号不一致", action: "login-copy", label: "登录原账号" },
+        cli_not_connected: { message: "终端尚未连接", action: "connect-terminal", label: "连接终端" },
+        revision_conflict: { message: "评注有更新", action: "library", label: "查看冲突" },
+      };
+      state.copyIssue = actions[e.code] || (login ? {
+        message: "登录未完成", action: "login-copy", label: "重试",
+      } : {
+        message: "复制失败", action: "copy", label: "重试",
+      });
     } finally {
       state.copying = false;
       renderPanel();

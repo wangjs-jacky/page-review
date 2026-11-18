@@ -46,6 +46,10 @@
   function enqueue(tx, note, workspaceId, kind = "upsert") {
     workspaceId = workspaceId || note.cloud?.workspaceId;
     if (!workspaceId) return note;
+    if (note.cloud?.workspaceId && note.cloud.workspaceId !== workspaceId)
+      throw Object.assign(new Error("请登录保存这些评注的账号"), {
+        code: "account_mismatch",
+      });
     const previous = note.cloud?.workspaceId === workspaceId ? note.cloud : {};
     note = {
       ...note,
@@ -109,15 +113,25 @@
     const db = await open(),
       tx = db.transaction(["notes", "assets", "outbox"], "readwrite"),
       completion = done(tx);
+    let failure;
     const request = tx.objectStore("notes").get(id);
     request.onsuccess = () => {
-      const note = request.result;
-      if (note?.cloud?.workspaceId)
-        enqueue(tx, note, workspaceId || note.cloud.workspaceId, "delete");
-      tx.objectStore("notes").delete(id);
-      tx.objectStore("assets").delete(id);
+      try {
+        const note = request.result;
+        if (note?.cloud?.workspaceId)
+          enqueue(tx, note, workspaceId || note.cloud.workspaceId, "delete");
+        tx.objectStore("notes").delete(id);
+        tx.objectStore("assets").delete(id);
+      } catch (error) {
+        failure = error;
+        tx.abort();
+      }
     };
-    await completion;
+    try {
+      await completion;
+    } catch (error) {
+      throw failure || error;
+    }
   }
   async function patch(id, update, workspaceId, { localOnly = false } = {}) {
     const db = await open(),
@@ -213,7 +227,7 @@
   }
   async function enroll(workspaceId) {
     for (const note of await list())
-      if (note.cloud?.workspaceId !== workspaceId)
+      if (!note.cloud?.workspaceId)
         await patch(note.id, (n) => ({ ...n }), workspaceId);
   }
   async function forkConflict(id, workspaceId, remote, remoteImage) {

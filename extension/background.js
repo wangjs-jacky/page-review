@@ -22,8 +22,8 @@ chrome.storage.local
   .setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })
   .catch(console.error);
 const cloudWorkspace = async () => (Cloud ? Cloud.workspace() : undefined);
-const syncCloud = () => {
-  if (Cloud) Cloud.sync().catch(() => {});
+const syncCloud = (page) => {
+  if (Cloud) Cloud.sync(page ? { page } : undefined).catch(() => {});
 };
 const settings = () =>
   chrome.storage.local.get({
@@ -286,10 +286,6 @@ async function handle(message, sender) {
     const page = ownPage || Core.pageKey(message.pageUrl);
     return Cloud.handoff(page);
   }
-  if (message.type === "SYNC_PAGE") {
-    const page = ownPage || Core.pageKey(message.pageUrl);
-    return Cloud.enrollPage(page);
-  }
   if (message.type.startsWith("CLOUD_")) {
     if (
       !Cloud ||
@@ -339,6 +335,16 @@ async function handle(message, sender) {
       default:
         throw new Error("未知云空间操作");
     }
+  }
+  if (["SAVE", "REBIND", "SET_OUTCOME", "DELETE"].includes(message.type)) {
+    const id = message.type === "SAVE" ? message.note?.id : message.id;
+    const existing = id ? await DB.get(id) : null;
+    const workspace = await cloudWorkspace();
+    if (existing?.cloud?.workspaceId && workspace &&
+        existing.cloud.workspaceId !== workspace)
+      throw Object.assign(new Error("请登录保存这些评注的账号"), {
+        code: "account_mismatch",
+      });
   }
   switch (message.type) {
     case "GET_SETTINGS":
@@ -560,9 +566,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     (value) => {
       respond({ ok: true, value });
       if (["SAVE", "REBIND", "SET_OUTCOME", "DELETE"].includes(message.type))
-        syncCloud();
+        syncCloud(value?.pageId || (sender.tab && /^https?:\/\//.test(sender.url || "")
+          ? Core.pageKey(sender.url)
+          : undefined));
     },
-    (error) => respond({ ok: false, error: error.message || "操作失败" }),
+    (error) => respond({ ok: false, error: error.message || "操作失败", code: error.code }),
   );
   return true;
 });

@@ -5,7 +5,7 @@ const vm = require("node:vm"),
   path = require("node:path"),
   crypto = require("node:crypto");
 const Core = require("../extension/core.js");
-function setup() {
+function setup({ cloud } = {}) {
   const records = new Map(),
     images = new Map(),
     local = { enabled: true },
@@ -107,6 +107,7 @@ function setup() {
   const context = vm.createContext({
     PageReviewCloudConfig: {},
     PageReviewCore: Core,
+    ...(cloud ? { PageReviewCloudFactory: () => cloud } : {}),
     PageReviewDB: DB,
     PageReviewRecorder: { resume: async () => false },
     chrome,
@@ -161,6 +162,33 @@ const sample = {
   type: "element",
   label: "资料说明",
 };
+test("保存先落盘并响应，再由保存事件自动上传；失败不影响本地记录", async () => {
+  const uploads = [];
+  const t = setup({ cloud: {
+    workspace: async () => "workspace-1",
+    sync: async (options) => { uploads.push(options); throw Error("offline"); },
+  } });
+  const saved = await t.call("SAVE", { note: sample, allowWithoutImage: true });
+  assert.equal(saved.ok, true);
+  assert.equal(t.records.get(saved.value.id).comment, sample.comment);
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].page, sample.url);
+});
+test("修改和删除拒绝其他账号记录，原记录不变且不触发上传", async () => {
+  let uploads = 0;
+  const t = setup({ cloud: {
+    workspace: async () => "workspace-2", sync: async () => { uploads++; },
+  } });
+  const existing = { ...sample, id: "foreign-note", pageId: sample.url, revision: 1,
+    cloud: { workspaceId: "workspace-1" } };
+  t.records.set(existing.id, existing);
+  const edit = await t.call("SAVE", { note: { ...existing, comment: "新文字" }, revision: 1 });
+  const deletion = await t.call("DELETE", { id: existing.id });
+  assert.equal(edit.code, "account_mismatch");
+  assert.equal(deletion.code, "account_mismatch");
+  assert.equal(t.records.get(existing.id).comment, sample.comment);
+  assert.equal(uploads, 0);
+});
 test("网页只能列出和读取本页数据，子frame和其他扩展请求被拒绝", async () => {
   const t = setup();
   t.records.set("one", { id: "one", pageId: sample.url });
@@ -355,4 +383,19 @@ test("限制存储为可信上下文后，开关通过明确消息通知已有�
   assert.equal(notices.length, 2);
   assert.equal(notices[0].id, 1);
   assert.equal(notices[0].message.type, "PAGE_REVIEW_SETTINGS_CHANGED");
+});
+
+test('资料库真实标签删除后仍触发同步，不把扩展URL当作网页处理', async () => {
+  const syncCalls = [];
+  const t = setup({ cloud: {
+    workspace: async () => undefined,
+    sync: async (options) => { syncCalls.push(options); },
+  } });
+  t.records.set('ego-cleanup-note', { id: 'ego-cleanup-note', pageId: t.page.url, url: t.page.url });
+  const result = await t.call('DELETE', { id: 'ego-cleanup-note' }, { ...t.library, tab: { id: 2 } });
+  await new Promise(setImmediate);
+  assert.equal(result.ok, true);
+  assert.equal(t.records.has('ego-cleanup-note'), false);
+  assert.equal(syncCalls.length, 1);
+  assert.equal(syncCalls[0], undefined);
 });

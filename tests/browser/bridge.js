@@ -24,7 +24,11 @@
   globalThis.__captureQueue = [];
   globalThis.__loginQueue = [];
   const realFetch=globalThis.fetch.bind(globalThis);
-  globalThis.fetch=(input,options)=>{if(typeof input==='string' && input.startsWith('https://review.paws.rodeo/')){const u=new URL(input);return realFetch(location.origin+u.pathname+u.search,options);}return realFetch(input,options);};
+  const routedFetch=(input,options)=>{if(typeof input==='string' && input.startsWith('https://review.paws.rodeo/')){const u=new URL(input);return realFetch(location.origin+u.pathname+u.search,options);}return realFetch(input,options);};
+  // Fault/auth adapters are opt-in and only exist in this loopback test harness.
+  globalThis.fetch=(input,options)=>globalThis.__adapterFetch
+    ? globalThis.__adapterFetch(input,options,routedFetch)
+    : routedFetch(input,options);
   globalThis.importScripts = () => {}; // The same files are loaded as ordered scripts below.
   globalThis.chrome = {
     identity: { getRedirectURL: () => "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.chromiumapp.org/page-review", launchWebAuthFlow: options => new Promise((resolve,reject) => globalThis.__loginQueue.push({ options, resolve, reject })) },
