@@ -819,10 +819,14 @@ h3 {
 }
 .orb-close {
   position: absolute;
-  right: -8px;
+  /* Keep dismiss separate from the count badge, above the orb's own stack. */
+  left: -10px;
   top: -12px;
   width: 24px;
   height: 24px;
+  padding: 0;
+  line-height: 1;
+  z-index: 36;
   display: grid;
   place-items: center;
   border-radius: 50%;
@@ -1667,5 +1671,3 @@ h3 {
 .v4-composer .composer-submit {
   min-height: 34px;
 }
-
-.floating-orb .brand-icon{display:block;width:36px;height:36px;object-fit:contain;border-radius:9px;pointer-events:none}.floating-orb:not(.is-marking){background:#f3eae4;color:#013ecb}

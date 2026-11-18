@@ -531,7 +531,7 @@
     }
     const active = state.mode !== "browse";
     shadow.getElementById("widget").innerHTML =
-      `<div class="orb-wrap"><button class="orb floating-orb ${active ? "is-marking" : ""} ${state.dock.side === "left" ? "docked-left" : ""}" data-action="toggle" aria-label="打开网页评注" aria-expanded="${state.panel === "menu"}" data-hint="${active ? "正在标注 · 点击切换方式" : "网页评注 · 拖动可换位置"}">${active ? icon("select") : `<img class="brand-icon" src="${chrome.runtime.getURL("icons/48.png")}" alt="" draggable="false">`}${state.notes.length ? `<span class="orb-count">${state.notes.length}</span>` : ""}</button><button class="orb-close" data-action="disable" aria-label="关闭网页评注" title="关闭，点击 Chrome 插件图标重新启用">${icon("close")}</button></div>`;
+      `<div class="orb-wrap"><button class="orb floating-orb ${active ? "is-marking" : ""} ${state.dock.side === "left" ? "docked-left" : ""}" data-action="toggle" aria-label="打开网页评注" aria-expanded="${state.panel === "menu"}" data-hint="${active ? "正在标注 · 点击切换方式" : "网页评注 · 拖动可换位置"}">${icon(active ? "select" : "pen")}${state.notes.length ? `<span class="orb-count">${state.notes.length}</span>` : ""}</button><button class="orb-close" data-action="disable" aria-label="关闭网页评注" title="关闭，点击 Chrome 插件图标重新启用">${icon("close")}</button></div>`;
     positionWidget();
     renderHint();
   }
