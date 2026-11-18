@@ -6,7 +6,7 @@ const { test } = require("node:test"),
   { setup } = require("./helpers/cloud.cjs");
 test("CLI PKCE回跳、私有配置、全部媒体固定引用读取、损坏附件不交付部分结果", async () => {
   const { storeConfig, readHandoff, login } = await import(
-      "../cli/page-review.mjs"
+      process.env.PAGE_REVIEW_TEST_BUNDLE || "../cli/page-review.mjs"
     ),
     t = await setup(),
     temp = await fs.mkdtemp(path.join(os.tmpdir(), "page-review-cli-"));

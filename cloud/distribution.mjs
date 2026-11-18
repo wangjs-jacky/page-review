@@ -1,6 +1,8 @@
-// Public CLI binaries are deliberately separate from private annotation FILES.
+// Public CLI packages are deliberately separate from private annotation FILES.
 export const VERSION = "0.4.2";
 const names = [
+  "page-review-node.tar.gz",
+  "SHA256SUMS.node",
   "page-review-darwin-arm64.tar.gz",
   "page-review-darwin-x64.tar.gz",
   "SHA256SUMS",
@@ -73,7 +75,7 @@ export async function distributionRoute(request, env) {
       "content-type":
         name === "install.sh"
           ? "text/x-shellscript; charset=utf-8"
-          : name === "SHA256SUMS"
+          : name === "SHA256SUMS" || name === "SHA256SUMS.node"
             ? "text/plain"
             : "application/gzip",
       "cache-control":

@@ -8,7 +8,8 @@
     "test": "node --test tests/*.test.cjs",
     "build": "node scripts/build.mjs",
     "dev:cloud": "node cloud/dev.mjs",
-    "build:cli": "node scripts/build-cli.mjs"
+    "build:cli": "node scripts/build-cli.mjs",
+    "build:cli:light": "node scripts/build-cli-light.mjs"
   },
   "engines": {
     "node": ">=24"

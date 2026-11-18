@@ -45,9 +45,9 @@ D1条件修订及幂等回执防止重复/过期覆盖。先上传R2并登记，
 
 ## macOS CLI分发
 
-独立可选 `RELEASES` R2绑定仅保存公开CLI制品，不能复用私人 `FILES`。构建产物原样放入该绑定，路径保持 `dist/cli/` 中的结构：`install.sh`、`releases/0.4.0/manifest.json`、两个架构tar.gz及`SHA256SUMS`。
+独立可选 `RELEASES` R2绑定仅保存公开CLI制品，不能复用私人 `FILES`。构建产物原样放入该绑定，路径保持 `dist/cli/` 中的结构：`install.sh`、`releases/0.4.0/manifest.json`、两个架构tar.gz及`SHA256SUMS`。本地未发布候选还包含`page-review-node.tar.gz`与`SHA256SUMS.node`，候选manifest及Worker就绪检查要求这些文件也存在；发布前必须完整准备，不能只替换安装脚本。
 
-Worker只有在manifest和所有制品存在时才将 `cliAvailable` 设为true，并开放 `/install.sh` 与白名单版本文件。未配置或缺文件时返回503，界面不显示虚构的可安装入口。无需暴露R2桶。安装器使用HTTPS、检查SHA-256、安装到用户 `~/.local/bin`，不使用sudo、Node或npx；不轮询自动更新。CLI版本由构建固定，不下载任意latest地址。
+Worker只有在manifest和所有制品存在时才将 `cliAvailable` 设为true，并开放 `/install.sh` 与白名单版本文件。未配置或缺文件时返回503，界面不显示虚构的可安装入口。无需暴露R2桶。安装器使用HTTPS、检查SHA-256、安装到用户 `~/.local/bin`，不使用sudo或npx；候选安装器复用已有Node 24+，缺失、不兼容或不可运行时自动选自包含包，不自动安装运行时。安装前与最终路径均严格验证CLI版本，失败恢复原CLI；不轮询自动更新。CLI版本由构建固定，不下载任意latest地址。
 
 ## 部署准备
 
