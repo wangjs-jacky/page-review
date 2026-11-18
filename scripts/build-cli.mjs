@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { buildLightCli } from "./build-cli-light.mjs";
 import { VERSION } from "../cli/page-review.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   bun =
@@ -15,8 +16,10 @@ if (u.protocol !== "https:" || u.origin !== origin)
   throw Error("分发需要固定HTTPS源");
 const dir = path.join(root, "dist/cli/releases", VERSION);
 await fs.mkdir(dir, { recursive: true });
+await fs.mkdir(path.join(root, ".local"), { recursive: true });
+const light = await buildLightCli();
 const sums = [],
-  files = [];
+  files = [light.name, "SHA256SUMS.node"];
 for (const arch of ["arm64", "x64"]) {
   const staging = await fs.mkdtemp(path.join(root, ".local/cli-build-"));
   try {

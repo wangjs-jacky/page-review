@@ -25,10 +25,25 @@ else
 fi
 work=$(mktemp -d)
 staging=''
+backup=''
+pending=false
+had_previous=false
 cleanup() {
   result=$?
   trap - EXIT HUP INT TERM
+  if [ "$pending" = true ]; then
+    if [ "$had_previous" = true ]; then
+      if ! mv -f "$backup/previous" "$target"; then
+        echo "恢复原 CLI 失败，备份保留在：$backup" >&2
+        backup=''
+        result=1
+      fi
+    else
+      rm -f "$target"
+    fi
+  fi
   rm -rf "$work"
+  [ -z "$backup" ] || rm -rf "$backup"
   if [ -n "$staging" ]; then rm -f "$staging"; fi
   exit "$result"
 }
@@ -71,6 +86,7 @@ if [ "$actual" != "$expected" ]; then
   exit 1
 fi
 [ "$(tar -tzf "$archive")" = page-review ] || { echo '安装包内容无效，未安装' >&2; exit 1; }
+case "$(tar -tvzf "$archive")" in -*) :;; *) echo '安装包必须包含普通文件' >&2; exit 1;; esac
 tar -xzf "$archive" -C "$work"
 [ -f "$work/page-review" ] && [ ! -L "$work/page-review" ] || exit 1
 if [ "$flavor" = node ]; then
@@ -87,10 +103,23 @@ fi
 [ "$candidate_version" = "$version" ] || { echo 'CLI版本校验失败，未安装' >&2; exit 1; }
 install_dir="${PAGE_REVIEW_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$install_dir"
-staging=$(mktemp "$install_dir/.page-review.XXXXXX")
+target="$install_dir/page-review"
+[ ! -d "$target" ] || { echo '安装目标是目录，未安装' >&2; exit 1; }
+staging=$(mktemp "$install_dir/.page-review-XXXXXX")
 cp "$work/page-review" "$staging"
 chmod 755 "$staging"
 echo '[4/4] 安装到原目录；保留原连接配置' >&2
-mv -f "$staging" "$install_dir/page-review"
-echo "已安装：$install_dir/page-review（${flavor}）"
-case ":$PATH:" in *":$install_dir:"*) echo '接着运行：page-review connect';; *) echo '将 ~/.local/bin 加入 PATH，或运行：~/.local/bin/page-review connect';; esac
+candidate_version=$("$staging" --version </dev/null) || { echo 'CLI版本校验失败，原CLI未改动' >&2; exit 1; }
+[ "$candidate_version" = "$version" ] || { echo 'CLI版本校验失败，原CLI未改动' >&2; exit 1; }
+backup=$(mktemp -d "$install_dir/.page-review-backup.XXXXXX")
+if [ -e "$target" ] || [ -L "$target" ]; then
+  cp -Pp "$target" "$backup/previous"
+  had_previous=true
+fi
+pending=true
+mv -f "$staging" "$target"
+installed_version=$("$target" --version </dev/null) || { echo '安装后版本校验失败，恢复原CLI' >&2; exit 1; }
+[ "$installed_version" = "$version" ] || { echo '安装后版本校验失败，恢复原CLI' >&2; exit 1; }
+pending=false
+echo "已安装：${target}（${flavor}），版本 $version 已验证"
+case ":$PATH:" in *":$install_dir:"*) echo '接着运行：page-review login';; *) echo '将 ~/.local/bin 加入 PATH，或运行：~/.local/bin/page-review login';; esac
