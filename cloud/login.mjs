@@ -87,12 +87,48 @@ export async function loginRoute(request, env) {
     if (!valid(id)) return json({ message: "登录请求无效" }, 400);
     const row = await db
       .prepare(
-        "SELECT client_kind FROM login_requests WHERE id=? AND expires_at>? AND consumed_at IS NULL",
+        "SELECT client_kind,callback,intent_challenge FROM login_requests WHERE id=? AND expires_at>? AND consumed_at IS NULL AND subject IS NULL",
       )
       .bind(id, Date.now())
       .first();
     if (!row) return json({ message: "登录请求已过期" }, 404);
-    return json({ access: row.client_kind === "reader" ? "reader" : "writer" });
+    return json({
+      access: row.client_kind === "reader" ? "reader" : "writer",
+      ...(row.intent_challenge
+        ? { terminalIntent: true, callback: row.callback }
+        : {}),
+    });
+  }
+  if (path === "/auth/terminal/start" && request.method === "POST") {
+    const body = await input(request);
+    if (
+      !body ||
+      !cliCallback(body.callback) ||
+      !valid(body.state) ||
+      !valid(body.challenge) ||
+      !valid(body.intentChallenge) ||
+      (body.workspaceId !== undefined &&
+        !/^w-[a-f0-9]{40}$/.test(body.workspaceId))
+    )
+      return json({ message: "终端连接参数无效" }, 400);
+    const id = random();
+    await db
+      .prepare(
+        "INSERT INTO login_requests(id,callback,client_state,challenge,expires_at,client_kind,intent_challenge,expected_workspace) VALUES(?,?,?,?,?,'reader',?,?)",
+      )
+      .bind(
+        id,
+        body.callback,
+        body.state,
+        body.challenge,
+        Date.now() + 10 * 60_000,
+        body.intentChallenge,
+        body.workspaceId || null,
+      )
+      .run();
+    const authorize = new URL("/page-review/authorize", env.LOGIN_ORIGIN);
+    authorize.searchParams.set("request_id", id);
+    return json({ requestId: id, authorizeUrl: authorize.href });
   }
   if (path === "/auth/start" && request.method === "GET") {
     const callback = url.searchParams.get("redirect_uri"),
@@ -174,6 +210,29 @@ export async function loginRoute(request, env) {
       Date.parse(identity.sessionExpiresAt) <= Date.now()
     )
       return json({ message: "身份已过期或不适用于此应用" }, 401);
+    const pending = await db
+      .prepare(
+        "SELECT intent_challenge,expected_workspace FROM login_requests WHERE id=? AND expires_at>? AND subject IS NULL AND consumed_at IS NULL",
+      )
+      .bind(identity.requestId, Date.now())
+      .first();
+    if (!pending) return json({ message: "登录请求已过期或已使用" }, 409);
+    if (
+      pending.intent_challenge &&
+      (!valid(identity.intentProof) ||
+        (await pkce(identity.intentProof)) !== pending.intent_challenge)
+    )
+      return json({ message: "未验证当前终端" }, 403);
+    const expectedWorkspace =
+      "w-" + (await sha(env.LOGIN_ORIGIN + "|" + identity.sub)).slice(0, 40);
+    if (
+      pending.expected_workspace &&
+      pending.expected_workspace !== expectedWorkspace
+    )
+      return json(
+        { message: "浏览器账号与插件账号不一致，请切换到插件账号后重试" },
+        409,
+      );
     const code = random();
     const row = await db
       .prepare(

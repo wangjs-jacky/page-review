@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Review · 网页评注",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "标下网页上值得关注的地方，保存评注和画面，跨网页整理给 AI。",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -47,5 +47,17 @@
       },
       "description": "启用网页评注或确认本页录制"
     }
-  }
+  },
+  "version_name": "0.4.2 预发布",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/48.png"
+      ],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ]
+    }
+  ]
 }

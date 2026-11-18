@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 const fs = require('node:fs'), crypto = require('node:crypto');
-const schema = ['0001.sql','0002-login.sql','0003-handoff.sql'].map(f=>fs.readFileSync(require('node:path').join(__dirname,'../../cloud/migrations',f),'utf8')).join('\n');
+const schema = ['0001.sql','0002-login.sql','0003-handoff.sql','0004-terminal-intent.sql'].map(f=>fs.readFileSync(require('node:path').join(__dirname,'../../cloud/migrations',f),'utf8')).join('\n');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j0e0AAAAASUVORK5CYII=', 'base64');
 const sha = data => crypto.createHash('sha256').update(data).digest('hex');
 async function setup() {

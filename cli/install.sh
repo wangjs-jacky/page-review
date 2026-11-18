@@ -2,7 +2,7 @@
 set -eu
 [ "$(uname -s)" = Darwin ] || { echo 'Page Review 首版仅支持 macOS' >&2; exit 1; }
 case "$(uname -m)" in arm64) arch=arm64;; x86_64) arch=x64;; *) echo '暂不支持此 Mac 架构' >&2; exit 1;; esac
-version=0.4.0
+version=0.4.2
 origin='__API_ORIGIN__'
 artifact="page-review-darwin-$arch.tar.gz"
 work=$(mktemp -d)
@@ -25,4 +25,4 @@ chmod 755 "$staging"
 "$staging" --version
 mv -f "$staging" "$install_dir/page-review"
 echo "已安装：$install_dir/page-review"
-case ":$PATH:" in *":$install_dir:"*) echo '接着运行：page-review login';; *) echo '将 ~/.local/bin 加入 PATH，或运行：~/.local/bin/page-review login';; esac
+case ":$PATH:" in *":$install_dir:"*) echo '接着运行：page-review connect';; *) echo '将 ~/.local/bin 加入 PATH，或运行：~/.local/bin/page-review connect';; esac

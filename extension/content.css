@@ -1667,3 +1667,5 @@ h3 {
 .v4-composer .composer-submit {
   min-height: 34px;
 }
+
+.floating-orb .brand-icon{display:block;width:36px;height:36px;object-fit:contain;border-radius:9px;pointer-events:none}.floating-orb:not(.is-marking){background:#f3eae4;color:#013ecb}

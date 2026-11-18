@@ -2,7 +2,7 @@
 
 在原网页点选、框选或评论整页，附上截图或区域视频。保存后点击“复制本页评注”，粘贴给终端 Agent；它通过独立只读 CLI 获取本页全部已保存评注和附件，无需先打开资料库。
 
-当前扩展版本为 **0.4.0 预发布版**。配套云 API、数据库迁移、终端只读授权与 macOS CLI HTTPS 分发已部署；真实云端保存、复制及独立 CLI 读取已验证。完整原生 Chrome 截图和 tabCapture 采集仍须分别验收，不能用媒体适配测试代替。
+当前源码为 **0.4.2 预发布版**。已接入 F5 图标，并为终端连接增加浏览器会话复用、终端在场校验与有效 reader 复用。本版本需要中央认证桥、增量迁移与配套云 API/CLI 一并升级。实现与升级前提见 [终端连接协议](integrations/better-auth/terminal-connect.md)。
 
 ## 使用流程
 
@@ -23,7 +23,7 @@ npm test
 npm run build
 ```
 
-默认 API 为 `https://review.paws.rodeo`；自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.0.zip` 是安装候选包。更新已有安装时保留原目录及扩展身份；不要先卸载丢失本机资料。
+默认 API 为 `https://review.paws.rodeo`；自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.2.zip` 是安装候选包。更新已有安装时保留原目录及扩展身份；不要先卸载丢失本机资料。
 
 CLI 为自包含 macOS arm64/x64 可执行文件，用户无需安装 Node、Bun 或 npx。用户安装及授权：
 

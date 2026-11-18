@@ -33,7 +33,7 @@ const mf = new runtime.Miniflare(
 );
 await mf.ready;
 const db = await mf.getD1Database("DB");
-for (const file of ["0001.sql", "0002-login.sql", "0003-handoff.sql"])
+for (const file of ["0001.sql", "0002-login.sql", "0003-handoff.sql", "0004-terminal-intent.sql"])
   for (const statement of (
     await fs.readFile(path.join(root, "cloud/migrations", file), "utf8")
   )
@@ -121,6 +121,7 @@ const server = http.createServer(async (req, res) => {
       res.end(Buffer.from(await response.arrayBuffer()));
       return;
     }
+    if (/^\/icons\/(16|32|48|128)\.png$/.test(pathname)) { res.setHeader("content-type","image/png");res.end(await fs.readFile(path.join(root,"extension",pathname)));return; }
     let content,
       mime = "application/javascript; charset=utf-8";
     if (pathname === "/reading") {

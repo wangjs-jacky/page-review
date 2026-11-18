@@ -117,12 +117,14 @@ export async function request(config, resource) {
       403: "当前连接权限不足，请确认使用AI只读连接",
       404: "资料不存在、已删除或不在当前授权范围",
     };
-    throw new Error(
+    const error = new Error(
       "读取失败 " +
         response.status +
         "：" +
         (guidance[response.status] || "接口暂不可用，请稍后手动重试"),
     );
+    error.status = response.status;
+    throw error;
   }
   return response;
 }

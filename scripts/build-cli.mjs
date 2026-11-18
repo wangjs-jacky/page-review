@@ -65,4 +65,8 @@ await fs.writeFile(
     origin,
   ),
 );
+await fs.copyFile(
+  path.join(root, "dist/cli/install.sh"),
+  path.join(dir, "install.sh"),
+);
 console.log("CLI制品就绪：dist/cli；尚未发布");

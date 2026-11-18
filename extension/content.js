@@ -531,7 +531,7 @@
     }
     const active = state.mode !== "browse";
     shadow.getElementById("widget").innerHTML =
-      `<div class="orb-wrap"><button class="orb floating-orb ${active ? "is-marking" : ""} ${state.dock.side === "left" ? "docked-left" : ""}" data-action="toggle" aria-label="打开网页评注" aria-expanded="${state.panel === "menu"}" data-hint="${active ? "正在标注 · 点击切换方式" : "网页评注 · 拖动可换位置"}">${icon(active ? "select" : "pen")}${state.notes.length ? `<span class="orb-count">${state.notes.length}</span>` : ""}</button><button class="orb-close" data-action="disable" aria-label="关闭网页评注" title="关闭，点击 Chrome 插件图标重新启用">${icon("close")}</button></div>`;
+      `<div class="orb-wrap"><button class="orb floating-orb ${active ? "is-marking" : ""} ${state.dock.side === "left" ? "docked-left" : ""}" data-action="toggle" aria-label="打开网页评注" aria-expanded="${state.panel === "menu"}" data-hint="${active ? "正在标注 · 点击切换方式" : "网页评注 · 拖动可换位置"}">${active ? icon("select") : `<img class="brand-icon" src="${chrome.runtime.getURL("icons/48.png")}" alt="" draggable="false">`}${state.notes.length ? `<span class="orb-count">${state.notes.length}</span>` : ""}</button><button class="orb-close" data-action="disable" aria-label="关闭网页评注" title="关闭，点击 Chrome 插件图标重新启用">${icon("close")}</button></div>`;
     positionWidget();
     renderHint();
   }
@@ -662,7 +662,7 @@
     const c = state.cloud || {},
       ready = c.cliConnections?.length,
       cap = c.capabilities;
-    return `<section class="panel setup-panel" role="dialog" aria-label="连接设置">${panelHead("连接设置")}<div class="setup-body">${!c.configured ? '<button class="btn primary full" data-action="login">登录账号</button>' : `<div class="setup-account">${esc(c.name || "已登录")}<span class="connected-dot">●</span></div>${ready ? `<div class="setup-connected"><strong>终端已连接</strong>${c.cliConnections.map((n) => `<span>${esc(n.device_name)}</span>`).join("")}</div>` : `${cap?.cliAvailable ? '<button class="btn primary full" data-action="copy-install">复制 macOS 安装命令</button><button class="btn full" data-action="copy-login">复制终端登录命令</button>' : `<p class="muted">${cap ? "终端安装包尚未发布" : "服务需要更新，暂不能连接终端"}</p>`}`}<button class="text-button" data-action="check-connection">检查连接</button>`}<button class="text-button" data-action="library">管理账号与连接 ${icon("arrow")}</button></div></section>`;
+    return `<section class="panel setup-panel" role="dialog" aria-label="连接设置">${panelHead("连接设置")}<div class="setup-body">${!c.configured ? '<button class="btn primary full" data-action="login">登录账号</button>' : `<div class="setup-account">${esc(c.name || "已登录")}<span class="connected-dot">●</span></div>${ready ? `<div class="setup-connected"><strong>终端已连接</strong>${c.cliConnections.map((n) => `<span>${esc(n.device_name)}</span>`).join("")}</div>` : `${cap?.cliAvailable && cap?.terminalConnect === 1 ? '<button class="btn primary full" data-action="copy-install">复制 macOS 安装命令</button><button class="btn full" data-action="copy-login">连接终端 · 复制命令</button>' : `<p class="muted">${cap ? "终端连接组件需要更新" : "服务需要更新，暂不能连接终端"}</p>`}`}<button class="text-button" data-action="check-connection">检查连接</button>`}<button class="text-button" data-action="library">管理账号与连接 ${icon("arrow")}</button></div></section>`;
   }
   function copyMarkup() {
     const issue = state.copyIssue;
@@ -1065,7 +1065,7 @@
           toast("已复制安装命令");
           break;
         case "copy-login":
-          await clipboard("page-review login --api " + state.cloud.apiUrl);
+          await clipboard("page-review connect --api " + state.cloud.apiUrl + " --workspace " + state.cloud.workspaceId);
           toast("已复制登录命令");
           break;
         case "copy":

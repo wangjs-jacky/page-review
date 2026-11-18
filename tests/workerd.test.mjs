@@ -36,7 +36,7 @@ test("当前Worker源码在真实workerd/D1/R2读取60条固定清单；修改�
   try {
     await mf.ready;
     const db = await mf.getD1Database("DB");
-    for (const name of ["0001.sql", "0002-login.sql", "0003-handoff.sql"])
+    for (const name of ["0001.sql", "0002-login.sql", "0003-handoff.sql", "0004-terminal-intent.sql"])
       for (const sql of (
         await fs.readFile(path.join(root, "cloud/migrations", name), "utf8")
       )

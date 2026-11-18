@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- Optical master: solid one-pixel features, one annotation, uninterrupted folded ribbon. -->
+  <rect x=".5" y=".5" width="15" height="15" rx="3.5" fill="#f3eae4"/>
+  <path d="M2 7 5 4h7l2 4v4l-3 2H6l-4-3Z" fill="#013ecb"/>
+  <rect x="4" y="3" width="8" height="9" rx="1.5" fill="#fff7ee"/>
+  <path d="M5.5 3h5A1.5 1.5 0 0 1 12 4.5V5H4v-.5A1.5 1.5 0 0 1 5.5 3Z" fill="#1d3463"/>
+  <path d="M5 6h6v2H8.5L8 9l-1-1H5Z" fill="#fe7902"/>
+  <path d="M2 7.5 11 12l3-4v3.5L11 14H7l-5-3Z" fill="#013ecb"/>
+  <path d="m11 12 3-4v2l-2.4 3Z" fill="#3984f8"/>
+</svg>

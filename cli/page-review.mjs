@@ -6,13 +6,14 @@ import http from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { terminalRelay } from "./terminal-intent.mjs";
 import {
   configPath,
   readConfigFile,
   validateConfig,
   verifyReader,
 } from "../agent-skills/page-review/scripts/connection.mjs";
-export const VERSION = "0.4.0",
+export const VERSION = "0.4.2",
   DEFAULT_API = "https://review.paws.rodeo";
 const hash = (data) => createHash("sha256").update(data).digest("hex");
 function origin(value) {
@@ -109,34 +110,53 @@ export async function login(
       ),
     file = configPath(),
     timeout = 180000,
+    terminalIntent = false,
+    workspaceId,
   } = {},
 ) {
   apiUrl = origin(apiUrl);
   const verifier = randomBytes(32).toString("base64url"),
-    state = randomBytes(32).toString("base64url");
+    state = randomBytes(32).toString("base64url"),
+    proof = randomBytes(32).toString("base64url");
+  let pending;
   let resolveCallback, rejectCallback;
   const callback = new Promise((resolve, reject) => {
     resolveCallback = resolve;
     rejectCallback = reject;
   });
   callback.catch(() => {});
-  const server = http.createServer((req, res) => {
-    const u = new URL(req.url, "http://127.0.0.1");
-    res.setHeader("cache-control", "no-store");
-    res.setHeader("content-type", "text/plain; charset=utf-8");
-    res.setHeader("x-content-type-options", "nosniff");
-    if (
-      req.method !== "GET" ||
-      u.pathname !== "/callback" ||
-      u.searchParams.get("state") !== state ||
-      !/^[A-Za-z0-9_-]{43}$/.test(u.searchParams.get("code") || "")
-    ) {
+  const server = http.createServer(async (req, res) => {
+    try {
+      if (terminalIntent && pending && (await terminalRelay(req, res, pending)))
+        return;
+      const u = new URL(req.url, "http://127.0.0.1");
+      res.setHeader("cache-control", "no-store");
+      res.setHeader("content-type", "text/plain; charset=utf-8");
+      res.setHeader("x-content-type-options", "nosniff");
+      if (
+        req.method !== "GET" ||
+        u.pathname !== "/callback" ||
+        u.searchParams.get("state") !== state ||
+        !/^[A-Za-z0-9_-]{43}$/.test(u.searchParams.get("code") || "")
+      ) {
+        res.writeHead(400);
+        res.end("授权校验失败，请回到终端重试");
+        return;
+      }
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      const nonce = randomBytes(18).toString("base64url");
+      res.setHeader(
+        "content-security-policy",
+        `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'`,
+      );
+      res.end(
+        `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>终端连接 · Page Review</title><body><p>已收到授权，请回到终端。</p><script nonce="${nonce}">history.replaceState(null,"","/connected")</script></body></html>`,
+      );
+      resolveCallback(u.searchParams.get("code"));
+    } catch {
       res.writeHead(400);
-      res.end("授权校验失败，请回到终端重试");
-      return;
+      res.end("终端连接请求无效");
     }
-    res.end("已收到授权，请回到终端。");
-    resolveCallback(u.searchParams.get("code"));
   });
   const timer = setTimeout(
     () => rejectCallback(Error("浏览器授权超时，请重新运行 page-review login")),
@@ -155,7 +175,48 @@ export async function login(
       code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     }))
       start.searchParams.set(k, v);
-    await open(start.href);
+    if (terminalIntent) {
+      const response = await fetch(apiUrl + "/auth/terminal/start", {
+        method: "POST",
+        redirect: "manual",
+        signal: AbortSignal.timeout(20000),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          callback: start.searchParams.get("redirect_uri"),
+          state,
+          challenge: start.searchParams.get("code_challenge"),
+          intentChallenge: createHash("sha256")
+            .update(proof)
+            .digest("base64url"),
+          ...(workspaceId ? { workspaceId } : {}),
+        }),
+      });
+      if (!response.ok) throw Error("服务暂不支持简化连接，请更新服务后重试");
+      const value = await response.json(),
+        authorize = new URL(value.authorizeUrl);
+      if (
+        !/^[A-Za-z0-9_-]{43}$/.test(value.requestId || "") ||
+        authorize.pathname !== "/page-review/authorize" ||
+        authorize.username ||
+        authorize.password ||
+        authorize.hash ||
+        authorize.search !== "?request_id=" + value.requestId ||
+        !(
+          authorize.protocol === "https:" ||
+          (authorize.protocol === "http:" &&
+            new URL(apiUrl).protocol === "http:" &&
+            ["127.0.0.1", "localhost"].includes(authorize.hostname))
+        )
+      )
+        throw Error("登录服务返回无效连接");
+      pending = {
+        callbackOrigin: new URL(start.searchParams.get("redirect_uri")).origin,
+        loginOrigin: authorize.origin,
+        requestId: value.requestId,
+        proof,
+      };
+      await open(authorize.href);
+    } else await open(start.href);
     const code = await callback;
     const r = await fetch(apiUrl + "/auth/exchange", {
       method: "POST",
@@ -180,6 +241,32 @@ export async function login(
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
+}
+export async function connectTerminal(apiUrl = DEFAULT_API, options = {}) {
+  apiUrl = origin(apiUrl);
+  const file = options.file || configPath();
+  let existing;
+  try {
+    await fs.lstat(file);
+    existing = await readConfigFile(file);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (existing && existing.apiUrl === apiUrl) {
+    let who;
+    try {
+      who = await verifyReader(existing);
+    } catch (error) {
+      if (error.status !== 401 && !/过期/.test(error.message)) throw error;
+    }
+    if (who) {
+      if (options.workspaceId && who.workspaceId !== options.workspaceId)
+        throw Error("终端账号与插件账号不一致，请先退出此终端连接");
+      await confirm(existing);
+      return { connected: true, apiUrl, access: "reader", reused: true };
+    }
+  }
+  return login(apiUrl, { ...options, file, terminalIntent: true });
 }
 async function bounded(response, maximum) {
   const length = Number(response.headers.get("content-length") || 0);
@@ -294,9 +381,15 @@ export async function main(args = process.argv.slice(2)) {
     console.log(VERSION);
     return;
   }
-  if (command === "login") {
-    console.error("请在浏览器完成授权。");
-    console.log(JSON.stringify(await login(option("--api") || DEFAULT_API)));
+  if (command === "login" || (command === "connect" && !option("--from"))) {
+    console.error("正在连接终端；浏览器已登录时会自动继续。");
+    console.log(
+      JSON.stringify(
+        await connectTerminal(option("--api") || DEFAULT_API, {
+          workspaceId: option("--workspace"),
+        }),
+      ),
+    );
     return;
   }
   if (command === "connect") {

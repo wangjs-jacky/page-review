@@ -19,7 +19,7 @@ test("macOS curl HTTPS安装无需Node/npx/sudo；错误摘要不覆盖已有CLI
     await fs.access(
       path.join(
         root,
-        "dist/cli/releases/0.4.0/page-review-darwin-arm64.tar.gz",
+        "dist/cli/releases/0.4.2/page-review-darwin-arm64.tar.gz",
       ),
     );
   } catch {
@@ -59,7 +59,7 @@ test("macOS curl HTTPS安装无需Node/npx/sudo；错误摘要不覆盖已有CLI
             await fs.readFile(path.join(root, "cli/install.sh"), "utf8")
           ).replace("__API_ORIGIN__", origin);
         else if (
-          /^\/releases\/0\.4\.0\/(SHA256SUMS|page-review-darwin-(arm64|x64)\.tar\.gz)$/.test(
+          /^\/releases\/0\.4\.2\/(SHA256SUMS|page-review-darwin-(arm64|x64)\.tar\.gz)$/.test(
             req.url,
           )
         )
@@ -94,7 +94,7 @@ test("macOS curl HTTPS安装无需Node/npx/sudo；错误摘要不覆盖已有CLI
     );
     assert.match(result.stdout, /已安装/);
     const binary = path.join(installDir, "page-review");
-    assert.equal((await exec(binary, ["--version"])).stdout.trim(), "0.4.0");
+    assert.equal((await exec(binary, ["--version"])).stdout.trim(), "0.4.2");
     const hash = () =>
         fs
           .readFile(binary)

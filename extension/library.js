@@ -190,7 +190,7 @@
     );
     access.innerHTML =
       head("连接设置") +
-      `<div class="settings-body">${!connected ? '<button class="btn primary" data-action="login">登录账号</button>' : `<div class="account-row"><strong>${esc(c.name || "已登录")}</strong><button class="text-button" data-action="logout">退出</button></div>${ready ? c.cliConnections.map((n) => `<div class="connection"><div><strong>${esc(n.device_name)}</strong><span>已连接</span></div><button class="text-button" data-action="revoke" data-id="${n.id}">撤销</button></div>`).join("") : cap?.cliAvailable ? '<button class="btn primary" data-action="copy-install">复制 macOS 安装命令</button><button class="btn" data-action="copy-login">复制终端登录命令</button>' : `<p class="muted">${cap ? "终端安装包尚未发布" : "服务需要更新，暂不能连接终端"}</p>`}<button class="text-button" data-action="check">检查连接</button>${c.pending?.length ? `<div class="sync-error"><span>${c.pending.length} 条待同步</span><button class="text-button" data-action="sync">重试同步</button></div>` : ""}`}${deleted.map((n) => `<div class="sync-error"><span>${esc(n.localComment)}<br>云端记录已有修改</span><button class="text-button" data-action="restore-deleted" data-id="${n.id}">恢复云端记录</button></div>`).join("")}<p id="settings-error" class="inline-error" role="alert"></p></div>`;
+      `<div class="settings-body">${!connected ? '<button class="btn primary" data-action="login">登录账号</button>' : `<div class="account-row"><strong>${esc(c.name || "已登录")}</strong><button class="text-button" data-action="logout">退出</button></div>${ready ? c.cliConnections.map((n) => `<div class="connection"><div><strong>${esc(n.device_name)}</strong><span>已连接</span></div><button class="text-button" data-action="revoke" data-id="${n.id}">撤销</button></div>`).join("") : cap?.cliAvailable && cap?.terminalConnect === 1 ? '<button class="btn primary" data-action="copy-install">复制 macOS 安装命令</button><button class="btn" data-action="copy-login">连接终端 · 复制命令</button>' : `<p class="muted">${cap ? "终端连接组件需要更新" : "服务需要更新，暂不能连接终端"}</p>`}<button class="text-button" data-action="check">检查连接</button>${c.pending?.length ? `<div class="sync-error"><span>${c.pending.length} 条待同步</span><button class="text-button" data-action="sync">重试同步</button></div>` : ""}`}${deleted.map((n) => `<div class="sync-error"><span>${esc(n.localComment)}<br>云端记录已有修改</span><button class="text-button" data-action="restore-deleted" data-id="${n.id}">恢复云端记录</button></div>`).join("")}<p id="settings-error" class="inline-error" role="alert"></p></div>`;
   }
   async function settings() {
     if (state.editing) throw Error("请先保存或取消修改");
@@ -347,7 +347,7 @@
         "curl -fsSL " + state.cloud.capabilities.installUrl + " | sh",
       );
     if (a === "copy-login")
-      return copy("page-review login --api " + state.cloud.apiUrl);
+      return copy("page-review connect --api " + state.cloud.apiUrl + " --workspace " + state.cloud.workspaceId);
   }
   document.addEventListener("click", async (e) => {
     const b = e.target.closest("[data-action]");

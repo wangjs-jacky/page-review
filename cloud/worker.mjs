@@ -455,7 +455,7 @@ async function route(request, env) {
   const distribution = await distributionRoute(request, env);
   if (distribution) return distribution;
   if (path === "/health" && method === "GET")
-    return json({ service: "page-review", version: "0.4.0" });
+    return json({ service: "page-review", version: "0.4.2" });
   const login = await loginRoute(request, env);
   if (login) return login;
   requireThat(path.startsWith("/v1/"), 404, "not_found", "接口不存在");

@@ -1,5 +1,5 @@
 // Public CLI binaries are deliberately separate from private annotation FILES.
-export const VERSION = "0.4.0";
+export const VERSION = "0.4.2";
 const names = [
   "page-review-darwin-arm64.tar.gz",
   "page-review-darwin-x64.tar.gz",
@@ -16,7 +16,8 @@ async function manifest(env) {
       !names.every((n) => m.files.includes(n))
     )
       return null;
-    if (!(await env.RELEASES.head("install.sh"))) return null;
+    if (!(await env.RELEASES.head(`releases/${VERSION}/install.sh`)))
+      return null;
     for (const n of names)
       if (!(await env.RELEASES.head(`releases/${VERSION}/${n}`))) return null;
     return m;
@@ -37,6 +38,7 @@ export async function capabilities(env) {
     version: VERSION,
     regionalRecording: true,
     fixedHandoffs: true,
+    terminalConnect: 1,
     cliAvailable: ready,
     installUrl: ready ? `${env.API_ORIGIN}/install.sh` : null,
   };
@@ -54,12 +56,17 @@ export async function distributionRoute(request, env) {
       headers: { "cache-control": "no-store" },
     });
   const name = path === "/install.sh" ? "install.sh" : path.split("/").at(-1);
+  const requestedVersion = path.split("/")[2];
   if (
     path !== "/install.sh" &&
-    (path !== `/releases/${VERSION}/${name}` || !names.includes(name))
+    (![VERSION, "0.4.0"].includes(requestedVersion) ||
+      path !== `/releases/${requestedVersion}/${name}` ||
+      !names.includes(name))
   )
     return new Response("Not found", { status: 404 });
-  const o = await env.RELEASES.get(path.slice(1));
+  const o = await env.RELEASES.get(
+    path === "/install.sh" ? `releases/${VERSION}/install.sh` : path.slice(1),
+  );
   if (!o) return new Response("Not found", { status: 404 });
   return new Response(o.body, {
     headers: {
@@ -69,7 +76,8 @@ export async function distributionRoute(request, env) {
           : name === "SHA256SUMS"
             ? "text/plain"
             : "application/gzip",
-      "cache-control": "public, max-age=300",
+      "cache-control":
+        name === "install.sh" ? "no-store" : "public, max-age=300",
       "x-content-type-options": "nosniff",
     },
   });
