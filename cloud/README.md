@@ -45,9 +45,11 @@ D1条件修订及幂等回执防止重复/过期覆盖。先上传R2并登记，
 
 ## macOS CLI分发
 
-独立可选 `RELEASES` R2绑定仅保存公开CLI制品，不能复用私人 `FILES`。构建产物原样放入该绑定，路径保持 `dist/cli/` 中的结构：`install.sh`、`releases/0.4.0/manifest.json`、两个架构tar.gz及`SHA256SUMS`。
+独立可选 `RELEASES` R2绑定仅保存公开CLI制品，不能复用私人 `FILES`。当前协议版本为0.4.2：原 `releases/0.4.2/manifest.json`、两个架构tar.gz和 `SHA256SUMS` 保持；增量发布 `releases/0.4.2/page-review-node.tar.gz`、`releases/0.4.2/SHA256SUMS.node` 与 `installers/0.4.2-r1.sh`。已发布的原包和安装器保留，回滚Worker即可恢复旧安装入口。
 
-Worker只有在manifest和所有制品存在时才将 `cliAvailable` 设为true，并开放 `/install.sh` 与白名单版本文件。未配置或缺文件时返回503，界面不显示虚构的可安装入口。无需暴露R2桶。安装器使用HTTPS、检查SHA-256、安装到用户 `~/.local/bin`，不使用sudo、Node或npx；不轮询自动更新。CLI版本由构建固定，不下载任意latest地址。
+Worker只有在manifest、全部包及新安装器存在时才将 `cliAvailable` 设为true，并开放 `/install.sh`。脚本不缓存；白名单内的版本化公开文件单独读取并进入边缘缓存，支持HEAD、单一Range、If-Range和ETag。范围响应不入缓存，非法范围返回416；私有API和 `FILES` 完全不走此缓存。无需暴露R2桶或新增后台轮询。
+
+安装器使用HTTPS、SHA-256及版本核验后原子安装到用户 `~/.local/bin`，不使用sudo或npx。已有Node 24+时优先使用约6KB轻量包，否则下载原自包含包。下载有阶段/进度、连接/低速/总时限；失败保留部分包供下次用户运行时续传，完整包校验后复用。损坏包不替换已有CLI，连接配置保留。CLI版本固定，不下载任意latest地址。
 
 ## 部署准备
 

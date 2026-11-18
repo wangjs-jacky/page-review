@@ -84,6 +84,9 @@ test("macOS curl HTTPS安装无需Node/npx/sudo；错误摘要不覆盖已有CLI
     env = {
       ...process.env,
       PAGE_REVIEW_INSTALL_DIR: installDir,
+      PAGE_REVIEW_CACHE_DIR: path.join(dir, "cache"),
+      PAGE_REVIEW_CLI_FLAVOR: "auto",
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
       CURL_CA_BUNDLE: cert,
     };
   try {

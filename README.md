@@ -25,7 +25,7 @@ npm run build
 
 默认 API 为 `https://review.paws.rodeo`；自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.3.zip` 是扩展安装包。更新已有安装时保留原目录及扩展身份；不要先卸载丢失本机资料。
 
-CLI 为自包含 macOS arm64/x64 可执行文件，用户无需安装 Node、Bun 或 npx。用户安装及授权：
+CLI 安装器支持 macOS arm64/x64。已有 Node 24+ 时优先下载约 6KB 的轻量版；其余机器使用约 40MB 的自包含版，无需另装运行时。两版使用相同登录和读取协议，凭证分别保存在执行机器的私有配置中。用户安装及授权：
 
 ```sh
 curl -fsSL https://review.paws.rodeo/install.sh | sh
@@ -36,10 +36,11 @@ curl -fsSL https://review.paws.rodeo/install.sh | sh
 
 ```sh
 PAGE_REVIEW_BUN=/absolute/path/to/bun npm run build:cli
-node --test tests/installer.test.mjs
+PAGE_REVIEW_BUN=/absolute/path/to/bun npm run build:cli:light
+node --test tests/installer.test.mjs tests/installer-delivery.test.mjs
 ```
 
-制品在 `dist/cli/`，包括校验清单及 `install.sh`。HTTPS curl安装和摘要失败时保留原版本有独立测试。代码构建不等于已完成公证、签名、公开分发或所有架构的真机验证。
+制品在 `dist/cli/`；轻量构建单独生成 `SHA256SUMS.node` 和 `installers/0.4.2-r1.sh`，保留原独立包与校验清单。安装显示阶段和进度，有连接、低速和总时限；中断后再次运行同一命令可续传，不自动重试。SHA-256 和版本核验通过后才原子替换 CLI。设置 `PAGE_REVIEW_CLI_FLAVOR=standalone` 可强制使用独立版。轻量版运行时仍需要 PATH 中的 Node 24+。代码构建不等于已完成公证、签名、公开分发或所有架构的真机验证。
 
 ## 验证与部署边界
 

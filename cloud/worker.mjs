@@ -448,11 +448,11 @@ async function commit(request, db, who, id, deleting) {
     },
   );
 }
-async function route(request, env) {
+async function route(request, env, ctx) {
   const url = new URL(request.url),
     path = url.pathname,
     method = request.method;
-  const distribution = await distributionRoute(request, env);
+  const distribution = await distributionRoute(request, env, ctx);
   if (distribution) return distribution;
   if (path === "/health" && method === "GET")
     return json({ service: "page-review", version: "0.4.2" });
@@ -728,9 +728,9 @@ async function route(request, env) {
   throw new Failure(404, "not_found", "接口不存在");
 }
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
-      return await route(request, env);
+      return await route(request, env, ctx);
     } catch (error) {
       if (error instanceof Failure)
         return json(
