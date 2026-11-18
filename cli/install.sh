@@ -7,7 +7,7 @@ version=0.4.2
 origin='__API_ORIGIN__'
 flavor="${PAGE_REVIEW_CLI_FLAVOR:-auto}"
 has_node=false
-if command -v node >/dev/null 2>&1 && node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' </dev/null 2>/dev/null; then has_node=true; fi
+if command -v node >/dev/null 2>&1 && node --use-env-proxy -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' </dev/null 2>/dev/null; then has_node=true; fi
 case "$flavor" in
   auto) if [ "$has_node" = true ]; then flavor=node; else flavor=standalone; fi;;
   node) [ "$has_node" = true ] || { echo '轻量版需要已有Node 24+；可用PAGE_REVIEW_CLI_FLAVOR=standalone选择独立版' >&2; exit 1; };;
@@ -73,6 +73,13 @@ fi
 [ "$(tar -tzf "$archive")" = page-review ] || { echo '安装包内容无效，未安装' >&2; exit 1; }
 tar -xzf "$archive" -C "$work"
 [ -f "$work/page-review" ] && [ ! -L "$work/page-review" ] || exit 1
+if [ "$flavor" = node ]; then
+  # Reuse the terminal's existing HTTP(S)_PROXY and NO_PROXY in this process.
+  # The archived JS stays immutable; normalize only its installed launch line.
+  { printf '%s\n' '#!/usr/bin/env -S node --use-env-proxy'; tail -n +2 "$work/page-review"; } > "$work/node-cli"
+  mv "$work/node-cli" "$work/page-review"
+  chmod 755 "$work/page-review"
+fi
 if ! candidate_version=$("$work/page-review" --version </dev/null); then
   echo 'CLI版本命令未正常退出，原CLI未改动' >&2
   exit 1

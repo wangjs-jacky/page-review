@@ -35,7 +35,7 @@ test('真实HTTPS轻量安装：中断保留旧版、再次运行206续传、完
   try{
     await assert.rejects(run(),e=>/下载未完成/.test(e.stderr));assert.equal(await fs.readFile(path.join(installDir,'page-review'),'utf8'),'previous-cli');
     const resumed=await run();assert.match(resumed.stdout,/已安装.*node/);assert.match(resumed.stderr,/\[1\/4\].*已有Node/);assert(requests.some(x=>x.range&&Number(x.range.match(/\d+/)[0])>0));assert(!requests.some(x=>x.url.includes('darwin-')));
-    const binary=path.join(installDir,'page-review');assert.equal((await exec(binary,['--version'],{env})).stdout.trim(),'0.4.2');assert.equal((await fs.stat(binary)).mode&0o777,0o755);
+    const binary=path.join(installDir,'page-review');assert.equal((await exec(binary,['--version'],{env})).stdout.trim(),'0.4.2');assert.equal((await fs.stat(binary)).mode&0o777,0o755);assert.equal((await fs.readFile(binary,'utf8')).split('\n')[0],'#!/usr/bin/env -S node --use-env-proxy');
     const downloads=()=>requests.filter(x=>x.url.endsWith('.tar.gz')).length,before=downloads(),cached=await run();assert.match(cached.stderr,/完整缓存/);assert.equal(downloads(),before);
     const installed=await fs.readFile(binary);bad=true;await assert.rejects(run(),e=>/校验失败/.test(e.stderr));assert((await fs.readFile(binary)).equals(installed));assert.equal(await fs.readFile(config,'utf8'),'preserve-connection');bad=false;
     stall=true;const start=performance.now();await assert.rejects(run({PAGE_REVIEW_CACHE_DIR:path.join(dir,'stall-cache'),PAGE_REVIEW_DOWNLOAD_TIMEOUT:'1'}),e=>/下载未完成/.test(e.stderr));assert(performance.now()-start<6000);assert((await fs.readFile(binary)).equals(installed));

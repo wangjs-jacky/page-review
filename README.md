@@ -40,7 +40,7 @@ PAGE_REVIEW_BUN=/absolute/path/to/bun npm run build:cli:light
 node --test tests/installer.test.mjs tests/installer-delivery.test.mjs
 ```
 
-制品在 `dist/cli/`；轻量构建单独生成 `SHA256SUMS.node` 和 `installers/0.4.2-r1.sh`，保留原独立包与校验清单。安装显示阶段和进度，有连接、低速和总时限；中断后再次运行同一命令可续传，不自动重试。SHA-256 和版本核验通过后才原子替换 CLI。设置 `PAGE_REVIEW_CLI_FLAVOR=standalone` 可强制使用独立版。轻量版运行时仍需要 PATH 中的 Node 24+。代码构建不等于已完成公证、签名、公开分发或所有架构的真机验证。
+制品在 `dist/cli/`；轻量构建单独生成 `SHA256SUMS.node` 和 `installers/0.4.2-r1.sh`，保留原独立包与校验清单。安装显示阶段和进度，有连接、低速和总时限；中断后再次运行同一命令可续传，不自动重试。SHA-256、版本值及命令退出码通过后才原子替换 CLI。设置 `PAGE_REVIEW_CLI_FLAVOR=standalone` 可强制使用独立版。轻量版需要 PATH 中支持 `--use-env-proxy` 的 Node 24+，否则自动选独立版；安装时规范启动行，使该CLI进程沿用现有HTTP(S)_PROXY与NO_PROXY，不修改系统代理。代码构建不等于已完成公证、签名、公开分发或所有架构的真机验证。
 
 ## 验证与部署边界
 
