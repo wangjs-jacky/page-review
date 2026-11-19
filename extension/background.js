@@ -471,7 +471,7 @@ async function handle(message, sender) {
                 },
               ],
               updatedAt: timestamp,
-              revision: current.revision + 1,
+              revision: (current.revision ?? 0) + 1,
             };
           },
           await cloudWorkspace(),

@@ -59,6 +59,7 @@
       ...note,
       cloud: {
         workspaceId,
+        ...(previous.assets ? { assets: previous.assets } : {}),
         remoteRevision: previous.remoteRevision || 0,
         syncedLocalRevision: previous.syncedLocalRevision || 0,
         status: "pending",

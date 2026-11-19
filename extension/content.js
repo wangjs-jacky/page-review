@@ -65,6 +65,7 @@
     suppressClick = 0,
     operation = 0,
     route = location.href;
+    state.recordSeed = null;
   const state = {
     cloud: null,
     copying: false,
@@ -236,10 +237,12 @@
     }
     return { ...result, element };
   }
+  let notesRequest = 0;
   async function loadNotes() {
+    const request = ++notesRequest;
     const at = location.href;
     const notes = await send("LIST");
-    if (!state.enabled || at !== location.href) return;
+    if (!state.enabled || at !== location.href || request !== notesRequest) return;
     state.notes = notes.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const currentSignature = signature();
     state.matches = new Map(
@@ -247,7 +250,7 @@
     );
     renderWidget();
     renderMarkers();
-    if (state.panel === "notes") renderPanel();
+    if (state.panel === "menu" || state.panel === "notes") renderPanel();
     send("LOCATION_RESULTS", {
       results: state.notes.map((note) => ({
         id: note.id,
@@ -285,8 +288,12 @@
       send,
       onError: (error) => toast(error.message),
       onEvent: (event) => {
-        if (state.panel === "editor" && state.draft && typeof event.comment === "string")
-          state.draft.note.comment = event.comment;
+        if (typeof event.comment === "string") {
+          if (state.panel === "editor" && state.draft)
+            state.draft.note.comment = event.comment;
+          if (state.panel === "record" && state.record)
+            state.record.seed.note.comment = event.comment;
+        }
         if (event.kind === "action") void action(event.dataset);
         if (event.kind === "key") keyDown({ ...event, preventDefault() {} });
       },
@@ -360,6 +367,7 @@
       subtree: true,
       characterData: true,
     });
+    privatePanel.prepare();
     renderWidget();
     renderPanel();
   }
@@ -479,7 +487,11 @@
       anchor: anchor && {
         left: anchor.left, top: anchor.top, width: anchor.width, height: anchor.height,
       },
-      recording: state.record && { rect: state.record.rect, viewport: state.record.viewport },
+      recording: state.record && {
+        rect: state.record.rect,
+        viewport: state.record.viewport,
+        activeControls: state.record.activeControls,
+      },
     };
   }
   function positionWidget(raw) {
@@ -652,20 +664,21 @@
         )}</div><button class="page-link" data-action="notes"><span>${icon("note")}本页评注</span><span>${state.notes.length}${icon("arrow")}</span></button>${copyMarkup()}<footer class="menu-footer"><button data-action="library">${icon("history")}历史记录</button><button class="icon-btn" data-action="markers" aria-label="${state.showMarkers ? "隐藏" : "显示"}页面标记" aria-pressed="${state.showMarkers}">${icon("eye")}</button></footer></section>`;
     else if (state.panel === "settings") html = connectionMarkup();
     else if (state.panel === "editor" && d)
-      html = `<section class="panel editor popover v4-composer" role="dialog" aria-label="添加评注" aria-busy="${state.busy}"><header class="popover-head"><span>${esc(d.note.label || "评注")}</span><button class="icon-btn" data-action="cancel-draft" aria-label="取消评注">${icon("close")}</button></header>${d.note.id ? "" : draftMedia(d)}<textarea id="review-comment" aria-label="评注内容" placeholder="添加评注…" maxlength="12000">${esc(d.note.comment)}</textarea>${d.error && d.asset ? `<p class="inline-error" role="alert">${esc(d.error)}</p>` : ""}<footer class="composer-bottom"><div class="feedback-actions">${["positive", "negative"].map((v) => `<button class="feedback-button" data-action="feedback" data-feedback="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${d.note.feedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}</div><button class="btn primary composer-submit" data-action="save">保存</button></footer></section>`;
+      html = `<section class="panel editor popover v4-composer" role="dialog" aria-label="${d.note.id ? "修改评注" : "添加评注"}" aria-busy="${state.busy}"><header class="popover-head"><span>${esc(d.note.label || "评注")}</span><button class="icon-btn" data-action="cancel-draft" aria-label="取消评注">${icon("close")}</button></header>${d.note.id ? "" : draftMedia(d)}<textarea id="review-comment" aria-label="评注内容" placeholder="添加评注…" maxlength="12000">${esc(d.note.comment)}</textarea>${d.error && (d.asset || d.note.id) ? `<p class="inline-error" role="alert">${esc(d.error)}</p>` : ""}<footer class="composer-bottom"><div class="feedback-actions">${["positive", "negative"].map((v) => `<button class="feedback-button" data-action="feedback" data-feedback="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${d.note.feedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}</div><button class="btn primary composer-submit" data-action="save">保存</button></footer></section>`;
     else if (state.panel === "notes")
       html = `<div class="drawer-backdrop" data-action="minimize"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="本页评注"><header class="drawer-head"><h2>本页评注</h2><button class="icon-btn" data-action="minimize" aria-label="关闭本页评注">${icon("close")}</button></header><div class="drawer-content">${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}</p>` : ""}${state.notes.length ? state.notes.map((n, i) => `<article class="drawer-note"><div class="saved-head"><span>${feedbackMarkup(n)}${esc(n.label)}</span><time>${date(n.createdAt)}</time></div><p>${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${esc(n.id)}">${n.hasVideo ? "播放录制" : n.hasImage ? "查看截图" : "查看评注"}</button><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="locate" data-id="${esc(n.id)}">定位</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div></article>`).join("") : '<div class="empty-state">本页还没有评注</div>'}</div><footer class="drawer-footer"><span>${state.notes.length} 条</span>${copyMarkup()}</footer></aside>`;
     else if (state.panel === "peek" && state.peek) {
       const n = state.notes.find((n) => n.id === state.peek.id),
         a = state.peek.asset;
       if (n)
-        html = `<div class="drawer-backdrop" data-action="close-peek"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="评注详情"><header class="drawer-head"><h2>评注详情</h2><button class="icon-btn" data-action="close-peek" aria-label="关闭详情">${icon("close")}</button></header><div class="drawer-content"><div class="saved-head"><a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(n.url).hostname)}</a><time>${date(n.createdAt)}</time></div>${feedbackMarkup(n)}<p class="detail-comment">${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div>${a?.video ? `<video class="saved-video" src="${esc(a.video)}" poster="${esc(a.viewport)}" controls muted playsinline></video>${a.frames?.length ? `<div class="keyframes">${a.frames.map((f) => `<button data-action="seek-frame" data-at="${Number(f.at)}" aria-label="跳转 ${clock(f.at)}"><img src="${esc(f.data)}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}` : a?.viewport ? `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${esc(a.viewport)}" alt="截图"></button>` : ""}</div></aside>`;
+        html = `<div class="drawer-backdrop" data-action="close-peek"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="评注详情"><header class="drawer-head"><h2>评注详情</h2><button class="icon-btn" data-action="close-peek" aria-label="关闭详情">${icon("close")}</button></header><div class="drawer-content"><div class="saved-head"><a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(n.url).hostname)}</a><time>${date(n.createdAt)}</time></div>${feedbackMarkup(n)}<p class="detail-comment">${esc(n.comment)}</p>${state.peek.error ? `<p class="inline-error" role="alert">${esc(state.peek.error)}</p>` : ""}<div class="drawer-note-actions"><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div>${a?.video ? `<video class="saved-video" src="${esc(a.video)}" poster="${esc(a.viewport)}" controls muted playsinline></video>${a.frames?.length ? `<div class="keyframes">${a.frames.map((f) => `<button data-action="seek-frame" data-at="${Number(f.at)}" aria-label="跳转 ${clock(f.at)}"><img src="${esc(f.data)}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}` : a?.viewport ? `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${esc(a.viewport)}" alt="截图"></button>` : ""}</div></aside>`;
     } else if (state.panel === "media") {
       const a = state.draft?.asset || state.peek?.asset;
       html = `<div class="drawer-backdrop" data-action="close-media"></div><section class="panel media-view" role="dialog" aria-modal="true" aria-label="截图">${panelHead("截图")}<button class="icon-btn media-close" data-action="close-media" aria-label="关闭截图">${icon("close")}</button><img src="${esc(a?.viewport || "")}" alt="截图"></section>`;
     } else if (state.panel === "record" && state.record) {
       const r = state.record;
-      html = `<section class="panel recording-control" role="dialog" aria-label="区域录制"><span>${r.phase === "recording" ? '<i class="record-dot"></i> 录制中' : r.phase === "waiting" ? "点击工具栏图标以允许录制" : r.phase === "starting" ? "正在启动…" : r.phase === "stopping" ? "正在处理…" : "区域录制"}</span>${r.phase === "recording" ? '<button class="btn primary small" data-action="stop-record">停止</button>' : ["ready", "failed"].includes(r.phase) ? '<button class="btn small" data-action="reselect-record">重选</button><button class="btn primary small" data-action="start-record">' + (r.phase === "failed" ? "重试" : "开始") + "</button>" : ""}<button class="icon-btn" data-action="cancel-record" aria-label="取消录制">${icon("close")}</button>${r.error ? `<p class="inline-error" role="alert">${esc(r.error)}</p>` : ""}</section>`;
+      const preparing = ["ready", "failed"].includes(r.phase);
+      html = `<section class="panel recording-control${preparing ? "" : " recording-control-active"}" role="dialog" aria-label="区域录制"><span>${r.phase === "recording" ? '<i class="record-dot"></i> 录制中' : r.phase === "waiting" ? "点击工具栏图标以允许录制" : r.phase === "starting" ? "正在启动…" : r.phase === "stopping" ? "正在处理…" : "区域录制"}</span>${r.phase === "recording" ? '<button class="btn primary small" data-action="stop-record">停止</button>' : ["ready", "failed"].includes(r.phase) ? '<button class="btn small" data-action="reselect-record">重选</button><button class="btn primary small" data-action="start-record">' + (r.phase === "failed" ? "重试" : "开始") + "</button>" : ""}<button class="icon-btn" data-action="cancel-record" aria-label="取消录制">${icon("close")}</button>${preparing ? `<textarea id="review-comment" aria-label="评注内容" placeholder="添加评注…" maxlength="12000">${esc(r.seed.note.comment)}</textarea>` : ""}${r.error ? `<p class="inline-error" role="alert">${esc(r.error)}</p>` : ""}</section>`;
     } else if (state.panel === "confirm") {
       const deleting = state.confirm?.kind === "delete";
       html = `<section class="panel confirm-panel" role="dialog" aria-modal="true" aria-label="${deleting ? "删除评注" : "放弃评注"}"><div class="confirm-body"><h3>${deleting ? "删除这条评注？" : "放弃未保存的评注？"}</h3><div class="confirm-row"><button class="btn" data-action="${deleting ? "close-peek" : "confirm-cancel"}">保留</button><button class="btn danger" data-action="${deleting ? "confirm-delete" : "confirm-discard"}">${deleting ? "删除" : "放弃"}</button></div></div></section>`;
@@ -716,7 +729,7 @@
     });
     shadow.getElementById("selection").append(box);
   }
-  async function collapse() {
+  function collapse() {
     if (state.draft) {
       state.panel = "editor";
       renderPanel(true);
@@ -727,14 +740,13 @@
     state.hover = null;
     state.rebind = null;
     highlight(null);
-    state.dock = { side: "right", bottom: 24 };
     renderWidget();
     renderPanel();
     renderMarkers();
-    await send("SAVE_DOCK", { dock: state.dock });
   }
   function setMode(mode) {
     state.mode = mode;
+    if (mode !== "record-area") state.recordSeed = null;
     const selecting = mode === "area" || mode === "record-area";
     if (selecting && !regionCursorSheet) {
       regionCursorSheet = new CSSStyleSheet();
@@ -883,10 +895,19 @@
       toast("先保存或取消当前评注");
       return;
     }
-    const asset = await send("GET_ASSET", { id });
-    state.peek = { id, asset };
+    const note = state.notes.find((n) => n.id === id);
+    if (!note) return;
+    const view = { id, asset: null };
+    state.peek = view;
     state.panel = "peek";
     renderPanel();
+    try {
+      view.asset = await send("GET_ASSET", { id });
+    } catch (error) {
+      view.error = error.message;
+    }
+    if (state.peek === view && state.panel === "peek" && (view.asset || view.error))
+      renderPanel();
   }
   function locate(id) {
     const match = state.matches.get(id),
@@ -916,16 +937,14 @@
     try {
       switch (name) {
         case "toggle":
-          if (!state.panel) {
-            await loadNotes();
-            refreshPageState().catch((e) => toast(e.message));
-          }
-          state.panel = state.panel ? null : state.draft ? "editor" : "menu";
+          state.panel = state.panel ? null : state.draft ? "editor" : state.record ? "record" : "menu";
           renderPanel(Boolean(state.draft));
           renderWidget();
+          if (state.panel === "menu")
+            refreshPageState().catch((e) => toast(e.message));
           break;
         case "minimize":
-          await collapse();
+          collapse();
           break;
         case "disable":
           if (
@@ -955,6 +974,7 @@
             toast("请先保存当前评注");
             break;
           }
+          state.recordSeed = null;
           enter("record-area");
           break;
         case "settings":
@@ -1074,12 +1094,17 @@
           renderPanel();
           break;
         case "confirm-delete":
-          await send("DELETE", { id: state.confirm.id });
-          state.confirm = null;
-          state.panel = "notes";
-          await loadNotes();
-          renderPanel();
-          toast("已删除");
+          state.busy = true;
+          try {
+            await send("DELETE", { id: state.confirm.id });
+            state.confirm = state.peek = null;
+            state.panel = "notes";
+            await loadNotes();
+            renderPanel();
+            toast("已删除");
+          } finally {
+            state.busy = false;
+          }
           break;
         case "page":
           if (state.draft) {
@@ -1182,7 +1207,6 @@
           const match = state.matches.get(note.id);
           state.draft = {
             note: { ...note },
-            asset: await send("GET_ASSET", { id: note.id }),
             target: match?.element || null,
             rect: match?.status === "found" ? markRect(note, match) : null,
           };
@@ -1509,10 +1533,6 @@
   function prepareRecording(target, rect, region) {
     try {
       PageReviewMedia.region(rect, viewport());
-      if (
-        !PageReviewMedia.controls(rect, viewport(), { width: 310, height: 48 })
-      )
-        throw Error("请缩小选区，为录制按钮留出空间");
       state.record = {
         rect,
         viewport: viewport(),
@@ -1561,6 +1581,12 @@
     r.viewport = viewport();
     r.seed.note.viewport = r.viewport;
     PageReviewMedia.region(r.rect, r.viewport);
+    r.activeControls = PageReviewMedia.activeControls(r.rect, r.viewport);
+    if (!r.activeControls) {
+      r.error = "请缩小选区，为录制按钮留出空间";
+      renderPanel();
+      return;
+    }
     r.phase = "starting";
     r.error = "";
     state.busy = true;
