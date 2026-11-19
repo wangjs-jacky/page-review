@@ -245,19 +245,24 @@
     const notes = await send("LIST");
     if (!state.enabled || at !== location.href || request !== notesRequest) return;
     state.notes = notes.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    const currentSignature = signature();
+    updateNotePositions(true);
+    renderWidget();
+    if (state.panel === "menu" || state.panel === "notes") renderPanel();
+  }
+  function updateNotePositions(fromStorage = false) {
+    const previous = state.matches;
+    const currentSignature = state.notes.length ? signature() : "";
     state.matches = new Map(
       state.notes.map((note) => [note.id, resolveNote(note, currentSignature)]),
     );
-    renderWidget();
     renderMarkers();
-    if (state.panel === "menu" || state.panel === "notes") renderPanel();
-    send("LOCATION_RESULTS", {
-      results: state.notes.map((note) => ({
-        id: note.id,
-        status: state.matches.get(note.id).status,
-      })),
-    }).catch(() => {});
+    const changed = state.notes.flatMap((note) => {
+      const { status } = state.matches.get(note.id);
+      const before = fromStorage ? note.locationStatus : previous.get(note.id)?.status;
+      return status === before ? [] : [{ id: note.id, status }];
+    });
+    if (changed.length)
+      send("LOCATION_RESULTS", { results: changed }).catch(() => {});
   }
   function mount() {
     if (host?.isConnected) return;
@@ -359,8 +364,10 @@
       if (observerTimer || state.busy || state.draft || state.record) return;
       observerTimer = setTimeout(() => {
         observerTimer = null;
-        pageChanged();
-        loadNotes().catch((error) => toast(error.message));
+        if (!state.enabled) return;
+        if (route !== location.href) pageChanged();
+        else if (!state.busy && !state.draft && !state.record)
+          updateNotePositions();
       }, 250);
     });
     observer.observe(document.body, {
@@ -417,6 +424,10 @@
   function pageChanged() {
     if (route === location.href) return;
     route = location.href;
+    state.notes = [];
+    state.matches.clear();
+    renderWidget();
+    renderMarkers();
     if (regionDrag) {
       regionDrag = null;
       highlight(null);
@@ -576,10 +587,10 @@
       positions.set(base, count + 1);
       const button = document.createElement("button");
       button.className = "pin note-pin";
-      button.dataset.action = "peek";
+      button.dataset.action = "edit";
       button.dataset.id = note.id;
       button.textContent = String(index + 1).padStart(2, "0");
-      button.setAttribute("aria-label", `查看评注 ${index + 1}`);
+      button.setAttribute("aria-label", `修改评注 ${index + 1}`);
       Object.assign(button.style, {
         left:
           Math.max(4, Math.min(innerWidth - 29, r.left - 12 + count * 26)) +
@@ -667,12 +678,12 @@
     else if (state.panel === "editor" && d)
       html = `<section class="panel editor popover v4-composer" role="dialog" aria-label="${d.note.id ? "修改评注" : "添加评注"}" aria-busy="${state.busy}"><header class="popover-head"><span>${esc(d.note.label || "评注")}</span><button class="icon-btn" data-action="cancel-draft" aria-label="取消评注">${icon("close")}</button></header>${d.note.id ? "" : draftMedia(d)}<textarea id="review-comment" aria-label="评注内容" placeholder="添加评注…" maxlength="12000">${esc(d.note.comment)}</textarea>${d.error && (d.asset || d.note.id) ? `<p class="inline-error" role="alert">${esc(d.error)}</p>` : ""}<footer class="composer-bottom"><div class="feedback-actions">${["positive", "negative"].map((v) => `<button class="feedback-button" data-action="feedback" data-feedback="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${d.note.feedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}</div><button class="btn primary composer-submit" data-action="save">保存</button></footer></section>`;
     else if (state.panel === "notes")
-      html = `<div class="drawer-backdrop" data-action="minimize"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="本页评注"><header class="drawer-head"><h2>本页评注</h2><button class="icon-btn" data-action="minimize" aria-label="关闭本页评注">${icon("close")}</button></header><div class="drawer-content">${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}</p>` : ""}${state.notes.length ? state.notes.map((n, i) => `<article class="drawer-note"><div class="saved-head"><span>${feedbackMarkup(n)}${esc(n.label)}</span><time>${date(n.createdAt)}</time></div><p>${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${esc(n.id)}">${n.hasVideo ? "播放录制" : n.hasImage ? "查看截图" : "查看评注"}</button><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="locate" data-id="${esc(n.id)}">定位</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div></article>`).join("") : '<div class="empty-state">本页还没有评注</div>'}</div><footer class="drawer-footer"><span>${state.notes.length} 条</span>${copyMarkup()}</footer></aside>`;
+      html = `<aside class="panel setup-panel notes-panel" role="dialog" aria-label="本页评注"><header class="drawer-head"><div class="notes-heading"><h2>本页评注</h2><span class="notes-count">${state.notes.length} 条</span></div><button class="icon-btn" data-action="minimize" aria-label="关闭本页评注">${icon("close")}</button></header><div class="drawer-content">${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}</p>` : ""}${state.notes.length ? state.notes.map((n, i) => `<article class="drawer-note"><div class="saved-head"><span>${feedbackMarkup(n)}${esc(n.label)}</span><time>${date(n.createdAt)}</time></div><p>${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${esc(n.id)}">${n.hasVideo ? "播放录制" : n.hasImage ? "查看截图" : "查看评注"}</button><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="locate" data-id="${esc(n.id)}">定位</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div></article>`).join("") : '<div class="empty-state">本页还没有评注</div>'}</div><footer class="notes-footer">${copyMarkup()}</footer></aside>`;
     else if (state.panel === "peek" && state.peek) {
       const n = state.notes.find((n) => n.id === state.peek.id),
         a = state.peek.asset;
       if (n)
-        html = `<div class="drawer-backdrop" data-action="close-peek"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="评注详情"><header class="drawer-head"><h2>评注详情</h2><button class="icon-btn" data-action="close-peek" aria-label="关闭详情">${icon("close")}</button></header><div class="drawer-content"><div class="saved-head"><a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(n.url).hostname)}</a><time>${date(n.createdAt)}</time></div>${feedbackMarkup(n)}<p class="detail-comment">${esc(n.comment)}</p>${state.peek.error ? `<p class="inline-error" role="alert">${esc(state.peek.error)}</p>` : ""}<div class="drawer-note-actions"><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div>${a?.video ? `<video class="saved-video" src="${esc(a.video)}" poster="${esc(a.viewport)}" controls muted playsinline></video>${a.frames?.length ? `<div class="keyframes">${a.frames.map((f) => `<button data-action="seek-frame" data-at="${Number(f.at)}" aria-label="跳转 ${clock(f.at)}"><img src="${esc(f.data)}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}` : a?.viewport ? `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${esc(a.viewport)}" alt="截图"></button>` : ""}</div></aside>`;
+        html = `<aside class="panel popover setup-panel notes-panel" role="dialog" aria-label="评注详情"><header class="drawer-head"><h2>评注详情</h2><button class="icon-btn" data-action="close-peek" aria-label="关闭详情">${icon("close")}</button></header><div class="drawer-content"><div class="saved-head"><a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(n.url).hostname)}</a><time>${date(n.createdAt)}</time></div>${feedbackMarkup(n)}<p class="detail-comment">${esc(n.comment)}</p>${state.peek.error ? `<p class="inline-error" role="alert">${esc(state.peek.error)}</p>` : ""}<div class="drawer-note-actions"><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div>${a?.video ? `<video class="saved-video" src="${esc(a.video)}" poster="${esc(a.viewport)}" controls muted playsinline></video>${a.frames?.length ? `<div class="keyframes">${a.frames.map((f) => `<button data-action="seek-frame" data-at="${Number(f.at)}" aria-label="跳转 ${clock(f.at)}"><img src="${esc(f.data)}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}` : a?.viewport ? `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${esc(a.viewport)}" alt="截图"></button>` : ""}</div></aside>`;
     } else if (state.panel === "media") {
       const a = state.draft?.asset || state.peek?.asset;
       html = `<div class="drawer-backdrop" data-action="close-media"></div><section class="panel media-view" role="dialog" aria-modal="true" aria-label="截图">${panelHead("截图")}<button class="icon-btn media-close" data-action="close-media" aria-label="关闭截图">${icon("close")}</button><img src="${esc(a?.viewport || "")}" alt="截图"></section>`;
@@ -1186,6 +1197,10 @@
           await save(true);
           break;
         case "cancel-draft":
+          if (state.draft?.note.id) {
+            await discardDraft();
+            break;
+          }
           if (
             state.draft &&
             (state.draft.note.comment.trim() ||
@@ -1209,9 +1224,16 @@
           locate(dataset.id);
           break;
         case "edit": {
+          if (state.draft) {
+            state.panel = "editor";
+            renderPanel(true);
+            break;
+          }
           const note = state.notes.find((n) => n.id === dataset.id);
           if (!note) break;
           const match = state.matches.get(note.id);
+          setMode("browse");
+          state.peek = null;
           state.draft = {
             note: { ...note },
             target: match?.element || null,
@@ -1433,6 +1455,8 @@
         if (state.panel === "media") {
           state.panel = state.mediaBack;
           renderPanel();
+        } else if (state.draft.note.id && !state.busy) {
+          discardDraft().catch((error) => toast(error.message));
         } else {
           state.panel = "editor";
           renderPanel(true);

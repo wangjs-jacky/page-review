@@ -175,3 +175,38 @@ test("the complete content script initializes and reads the enabled setting", ()
   assert.equal(typeof context.__pageReviewController.refresh, "function");
   assert.deepEqual(messages, ["GET_SETTINGS"]);
 });
+
+test("unchanged open panel keeps its DOM when refreshed or repositioned", async () => {
+  const messages = [];
+  const sendPort = { postMessage(message) { messages.push(message); } };
+  const frame = { style: {}, contentWindow: { postMessage() {} } };
+  let onMessage;
+  const context = vm.createContext({
+    URL, AbortController,
+    chrome: { runtime: { getURL: () => "https://extension.invalid/panel.html" } },
+    window: { addEventListener(_name, callback) { onMessage = callback; } },
+    document: { createElement: () => frame },
+    MessageChannel: class {
+      port1 = sendPort;
+      port2 = {};
+    },
+    setTimeout() {},
+    clearTimeout() {},
+  });
+  vm.runInContext(fs.readFileSync(asset("private-panel.js"), "utf8"), context);
+  const panel = context.PageReviewPrivatePanel({
+    container: { append() {} },
+    send: async () => "channel",
+  });
+  const html = "<section>评注 0</section>";
+  const layout = { dock: { x: 100, y: 100 } };
+  panel.render(html, layout, { focus: false });
+  await new Promise(setImmediate);
+  onMessage({ isTrusted: true, source: frame.contentWindow, origin: "https://extension.invalid", data: { type: "PAGE_REVIEW_PANEL_READY" } });
+  sendPort.onmessage({ data: { kind: "ready" } });
+  panel.render(html, { dock: { x: 100, y: 100 } }, { focus: false });
+  panel.render(html, { dock: { x: 120, y: 100 } }, { focus: false });
+  panel.render("<section>评注 1</section>", layout, { focus: false });
+  assert.deepEqual(messages.map((message) => message.kind), ["render", "position", "render"]);
+  assert.equal(messages[1].revision, messages[0].revision);
+});

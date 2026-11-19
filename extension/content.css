@@ -319,14 +319,6 @@ h3 {
   overflow: auto;
   flex: 1;
 }
-.drawer-footer {
-  padding: 16px 21px;
-  border-top: 1px solid var(--line);
-  display: flex;
-  gap: 9px;
-  justify-content: space-between;
-  background: #fff;
-}
 .drawer-note {
   padding: 18px 0;
   border-bottom: 1px solid #edf0f5;
@@ -1507,6 +1499,11 @@ h3 {
 .keyframes button:focus-visible {
   outline-offset: 0;
 }
+.panel.notes-panel {
+  width: min(405px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+}
 .notes-panel .drawer-head {
   display: flex;
   align-items: center;
@@ -1569,14 +1566,28 @@ h3 {
 .notes-panel .image-preview img {
   max-height: none;
 }
-.drawer-footer {
+.notes-heading {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
+  gap: 8px;
 }
-.drawer-footer .copy-region {
-  width: min(360px, 75%);
+.notes-count {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.notes-footer {
+  padding: 14px 24px 12px;
+  border-top: 1px solid var(--line);
+}
+.notes-footer .copy-region {
+  display: grid;
+  gap: 4px;
   padding: 0;
+}
+.notes-footer [data-action="copy-full"] {
+  justify-self: center;
+  padding: 7px 12px;
 }
 .media-view {
   width: min(1000px, calc(100vw - 48px));
