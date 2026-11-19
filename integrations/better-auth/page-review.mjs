@@ -191,6 +191,26 @@ export function createPageReviewBridge({
             loginOrigin,
           );
         }
+        if (!reader && details.extensionIntent === true &&
+            /^https:\/\/([a-p]{32})\.chromiumapp\.org\/page-review$/.test(details.callback || "")) {
+          const extensionId = new URL(details.callback).hostname.split(".")[0];
+          const data = { requestId, sessionId: identity.session.id, subject: identity.user.id,
+            kind: "extension", csrf: expected, expires: Date.now() + 60000 };
+          const encoded = Buffer.from(JSON.stringify(data)).toString("base64url");
+          const fields = { request_id: requestId, csrf: expected,
+            relay: encoded + "." + signature("terminal-relay\0" + encoded) };
+          return res.send(layout("正在登录网页评注",
+            '<div class="eyebrow">PAGE REVIEW</div><h1>正在返回网页…</h1><p id="page-review-status" role="status">身份已验证，正在接续同步。</p>',
+            `(async()=>{try{const extensionId=${JSON.stringify(extensionId)},requestId=${JSON.stringify(requestId)};
+            if(!globalThis.chrome?.runtime?.sendMessage)throw Error();
+            const proof=await chrome.runtime.sendMessage(extensionId,{type:"PAGE_REVIEW_LOGIN_PROOF",requestId});
+            if(!proof?.proof)throw Error();
+            const r=await fetch("/page-review/authorize",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({...${JSON.stringify(fields)},proof:proof.proof}).toString()});
+            if(!r.ok)throw Error();const value=await r.json();
+            const done=await chrome.runtime.sendMessage(extensionId,{type:"PAGE_REVIEW_LOGIN_COMPLETE",requestId,callbackUrl:value.callbackUrl});
+            if(!done?.ok)throw Error();document.querySelector("#page-review-status").textContent="已登录，可以返回原网页。";
+            }catch{document.querySelector("#page-review-status").textContent="登录未完成，请返回插件重试；本机评注仍保留。";}})();`));
+        }
         return res.send(
           layout(
             reader ? "授权终端" : "登录网页评注",

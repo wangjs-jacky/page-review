@@ -6,7 +6,7 @@ Page Review复用已有身份服务的GitHub/Google登录，不接管其他应�
 
 readConfig返回`{ apiOrigin, key }`。key是独立随机桥接密钥，仅保存在身份网关的私有文件和Worker Secret LOGIN_BRIDGE_KEY，不能复用第三方OAuth密钥或写进插件。API_ORIGIN与LOGIN_ORIGIN为固定允许源，不接受浏览器指定任意服务地址。
 
-浏览器从chrome.identity登录进入API，再跳到现有身份服务。用户确认后，中央服务器将短期签名证明直接POST给API；一次性码交回Chrome指定地址，插件使用PKCE交换自己的写入会话。用户名只作显示，个人空间按稳定issuer+user ID分配，不按邮箱合并。旧空间及记录不自动关联到新身份。
+新版插件使用[普通标签页自动接续协议](extension-login.md)；旧版chrome.identity登录继续兼容。身份验证及发起插件在场证明通过后，中央服务器将短期签名证明直接POST给API；一次性码交回Chrome指定地址，插件使用PKCE交换自己的写入会话。用户名只作显示，个人空间按稳定issuer+user ID分配，不按邮箱合并。旧空间及记录不自动关联到新身份。
 
 接入示意：
 

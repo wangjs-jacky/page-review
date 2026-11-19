@@ -13,9 +13,28 @@ const notify = (type, data = {}) =>
     .catch(() => {});
 async function start(message) {
   if (recording) throw Error("已有录制正在进行");
-  const { streamId, rect, viewport, pageUrl, tabId } = message;
+  const { streamId, rect, viewport, pageUrl, tabId, sessionId } = message;
   PageReviewMedia.region(rect, viewport);
-  let stream, canvasStream, pipeline;
+  const eventData = { tabId, pageUrl, sessionId };
+  let stream, canvasStream, pipeline, limit;
+  const release = () => {
+    clearTimeout(limit);
+    pipeline?.abort();
+    for (const track of [
+      ...(stream?.getTracks() || []),
+      ...(canvasStream?.getTracks() || []),
+    ]) track.stop();
+    if (recording === attempt) recording = null;
+  };
+  const attempt = {
+    sessionId,
+    cancelled: false,
+    cancel() {
+      attempt.cancelled = true;
+      release();
+    },
+  };
+  recording = attempt;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -23,6 +42,7 @@ async function start(message) {
         mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId },
       },
     });
+    if (attempt.cancelled) throw Error("录制已取消");
     if (typeof MediaStreamTrackProcessor !== "function" ||
         typeof MediaStreamTrackGenerator !== "function")
       throw Error("当前浏览器不支持区域录制");
@@ -33,7 +53,6 @@ async function start(message) {
       frames = [],
       chunks = [];
     let bytes = 0,
-      limit,
       started = performance.now(),
       stopping = false;
     function draw(frame) {
@@ -82,34 +101,42 @@ async function start(message) {
       rejectStopped = reject;
     });
     stopped.catch(() => {});
-    const cleanup = () => {
-      clearTimeout(limit);
-      pipeline?.abort();
-      for (const t of [...stream.getTracks(), ...canvasStream.getTracks()])
-        t.stop();
-      recording = null;
-    };
     const stop = (reason) => {
       if (stopping) return stopped;
       stopping = true;
-      recording.reason = reason || "";
+      attempt.reason = reason || "";
       recorder.stop();
       return stopped;
     };
-    recording = { stop, tabId, pageUrl, rect, viewport, started };
+    attempt.stop = stop;
+    attempt.cancel = () => {
+      attempt.cancelled = true;
+      if (!stopping) {
+        stopping = true;
+        try {
+          recorder.stop();
+        } catch {}
+      }
+      release();
+      rejectStopped(Error("录制已取消"));
+    };
     recorder.ondataavailable = (e) => {
-      if (e.data.size) {
+      if (!attempt.cancelled && e.data.size) {
         bytes += e.data.size;
         chunks.push(e.data);
         if (bytes >= 28000000) stop("已达到录制大小上限");
       }
     };
     recorder.onerror = () => {
-      cleanup();
+      if (attempt.cancelled) return;
+      attempt.cancelled = true;
+      stopping = true;
+      release();
       rejectStopped(Error("录制中断，请重录"));
-      notify("ERROR", { tabId, pageUrl, message: "录制中断，请重录" });
+      notify("ERROR", { ...eventData, message: "录制中断，请重录" });
     };
     recorder.onstop = async () => {
+      if (attempt.cancelled) return;
       try {
         const duration = Math.min(120, (performance.now() - started) / 1000),
           blob = new Blob(chunks, { type: "video/webm" });
@@ -144,6 +171,7 @@ async function start(message) {
             },
             capturedAt: new Date().toISOString(),
           };
+        if (attempt.cancelled) return;
         await PageReviewDB.putDraft({
           id,
           pageUrl,
@@ -151,14 +179,18 @@ async function start(message) {
           asset,
           createdAt: new Date().toISOString(),
         });
-        const reason = recording?.reason;
-        cleanup();
+        if (attempt.cancelled) {
+          await PageReviewDB.deleteDraft(id);
+          return;
+        }
+        release();
         resolveStopped({ draftId: id });
-        await notify("STOPPED", { tabId, pageUrl, draftId: id, reason });
+        await notify("STOPPED", { ...eventData, draftId: id, reason: attempt.reason });
       } catch (e) {
-        cleanup();
+        if (attempt.cancelled) return;
+        release();
         rejectStopped(e);
-        await notify("ERROR", { tabId, pageUrl, message: e.message });
+        await notify("ERROR", { ...eventData, message: e.message });
       }
     };
     for (const track of stream.getTracks())
@@ -188,16 +220,11 @@ async function start(message) {
       }
     });
     limit = setTimeout(() => stop("已达到两分钟上限"), 120000);
-    await notify("STARTED", { tabId, pageUrl });
+    await notify("STARTED", eventData);
+    if (attempt.cancelled) throw Error("录制已取消");
     return { recording: true };
   } catch (e) {
-    pipeline?.abort();
-    for (const t of [
-      ...(stream?.getTracks() || []),
-      ...(canvasStream?.getTracks() || []),
-    ])
-      t.stop();
-    recording = null;
+    release();
     throw e;
   }
 }
@@ -217,22 +244,20 @@ async function copyText(text) {
 }
 chrome.runtime.onMessage.addListener((m, s, respond) => {
   if (m?.target !== "offscreen" || s.id !== chrome.runtime.id) return;
+  const ownRecording = recording?.sessionId === m.sessionId ? recording : null;
+  if (m.command === "CANCEL") {
+    ownRecording?.cancel();
+    respond({ ok: true, value: { cancelled: true } });
+    return;
+  }
   const work =
     m.command === "COPY"
       ? copyText(m.text)
       : m.command === "START"
         ? start(m)
         : m.command === "STOP"
-          ? recording?.stop(m.reason)
-          : m.command === "CANCEL"
-            ? (async () => {
-                if (recording) {
-                  const { draftId } = await recording.stop();
-                  await PageReviewDB.deleteDraft(draftId);
-                }
-                return { cancelled: true };
-              })()
-            : Promise.resolve({ recording: Boolean(recording) });
+          ? ownRecording?.stop?.(m.reason)
+          : Promise.resolve({ recording: Boolean(recording) });
   Promise.resolve(work).then(
     (value) => respond({ ok: true, value }),
     (e) => respond({ ok: false, error: e.message }),

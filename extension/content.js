@@ -53,6 +53,7 @@
   };
   let host,
     shadow,
+    privatePanel,
     controller,
     observer,
     observerTimer,
@@ -60,6 +61,7 @@
     toastTimer,
     drag,
     regionDrag,
+    regionCursorSheet,
     suppressClick = 0,
     operation = 0,
     route = location.href;
@@ -255,10 +257,12 @@
   }
   function mount() {
     if (host?.isConnected) return;
+    privatePanel?.destroy();
+    document.querySelector("#page-review-overlay[data-page-review]")?.remove();
     host = document.createElement("div");
     host.id = "page-review-overlay";
     host.setAttribute("data-page-review", "");
-    shadow = host.attachShadow({ mode: "open" });
+    shadow = host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = PageReviewStyles;
     shadow.append(style);
@@ -276,18 +280,24 @@
     document.documentElement.append(host);
     controller = new AbortController();
     const options = { signal: controller.signal };
-    shadow.addEventListener("click", action, options);
-    shadow.addEventListener(
-      "input",
-      (event) => {
-        if (event.target.id === "review-comment" && state.draft) {
-          state.draft.note.comment = event.target.value;
-          updateComposer();
-          positionWidget();
-        }
+    privatePanel = PageReviewPrivatePanel({
+      container: shadow.getElementById("panel"),
+      send,
+      onError: (error) => toast(error.message),
+      onEvent: (event) => {
+        if (state.panel === "editor" && state.draft && typeof event.comment === "string")
+          state.draft.note.comment = event.comment;
+        if (event.kind === "action") void action(event.dataset);
+        if (event.kind === "key") keyDown({ ...event, preventDefault() {} });
       },
-      options,
-    );
+    });
+    shadow.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-action]");
+      if (!event.isTrusted || !button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void action(button.dataset);
+    }, options);
     shadow.addEventListener("pointerdown", orbDown, options);
     document.addEventListener("click", selectClick, {
       ...options,
@@ -306,10 +316,9 @@
       capture: true,
     });
     document.addEventListener("pointercancel", cancelPointer, options);
-    document.addEventListener("keydown", keyDown, {
-      ...options,
-      capture: true,
-    });
+    document.addEventListener("keydown", (event) => {
+      if (event.isTrusted) keyDown(event);
+    }, { ...options, capture: true });
     window.addEventListener(
       "resize",
       () => {
@@ -362,10 +371,18 @@
     observerTimer = null;
     cancelAnimationFrame(frame);
     clearTimeout(toastTimer);
+    privatePanel?.destroy();
+    privatePanel = null;
     host?.remove();
     host = null;
     shadow = null;
-    state.mode = "browse";
+    if (state.previousDraft) {
+      state.draft = state.previousDraft;
+      state.previousDraft = null;
+    }
+    state.record = null;
+    state.recordSeed = null;
+    setMode("browse");
     state.panel = null;
     state.hover = null;
     state.rebind = null;
@@ -391,6 +408,10 @@
   function pageChanged() {
     if (route === location.href) return;
     route = location.href;
+    if (regionDrag) {
+      regionDrag = null;
+      highlight(null);
+    }
     if (state.record) {
       cancelRecording().catch(() => {});
       toast("页面已切换，本次录制已停止");
@@ -401,7 +422,7 @@
       renderPanel();
     } else {
       state.panel = null;
-      state.mode = "browse";
+      setMode("browse");
       renderPanel();
     }
     loadNotes().catch((error) => toast(error.message));
@@ -451,71 +472,26 @@
       y,
     };
   }
+  function panelContext(dock = dockPosition()) {
+    const anchor = currentAnchor();
+    return {
+      dock: { ...dock, side: state.dock.side },
+      anchor: anchor && {
+        left: anchor.left, top: anchor.top, width: anchor.width, height: anchor.height,
+      },
+      recording: state.record && { rect: state.record.rect, viewport: state.record.viewport },
+    };
+  }
   function positionWidget(raw) {
     if (!shadow) return;
     const wrap = shadow.querySelector(".orb-wrap"),
-      panel = shadow.querySelector(".panel");
-    const p = raw || dockPosition();
+      p = raw || dockPosition();
     if (wrap)
       Object.assign(wrap.style, {
         left: Math.max(12, Math.min(innerWidth - 56, p.x)) + "px",
         top: Math.max(12, Math.min(innerHeight - 56, p.y)) + "px",
       });
-    if (panel?.classList.contains("recording-control") && state.record) {
-      const pos = PageReviewMedia.controls(
-        state.record.rect,
-        state.record.viewport,
-        {
-          width: Math.min(310, innerWidth - 24),
-          height: panel.getBoundingClientRect().height,
-        },
-      );
-      if (pos)
-        Object.assign(panel.style, {
-          left: pos.left + "px",
-          top: pos.top + "px",
-        });
-      return;
-    }
-    if (panel?.classList.contains("media-view")) {
-      const r = panel.getBoundingClientRect();
-      Object.assign(panel.style, {
-        left: Math.max(12, (innerWidth - r.width) / 2) + "px",
-        top: Math.max(12, (innerHeight - r.height) / 2) + "px",
-      });
-      return;
-    }
-    if (panel?.classList.contains("drawer")) return;
-    if (panel?.classList.contains("popover")) {
-      const rect = panel.getBoundingClientRect(),
-        anchor = currentAnchor();
-      const visible =
-        anchor && anchor.top + anchor.height > 0 && anchor.top < innerHeight;
-      const position = Core.placePopover(
-        visible ? anchor : null,
-        { width: innerWidth, height: innerHeight },
-        rect,
-      );
-      Object.assign(panel.style, {
-        left: position.left + "px",
-        top: position.top + "px",
-      });
-    } else if (panel) {
-      const rect = panel.getBoundingClientRect(),
-        gap = 12;
-      const left = Math.max(
-        12,
-        Math.min(
-          state.dock.side === "left" ? p.x + 56 : p.x - rect.width - gap,
-          innerWidth - rect.width - 12,
-        ),
-      );
-      const top = Math.max(
-        12,
-        Math.min(p.y + 44 - rect.height, innerHeight - rect.height - 12),
-      );
-      Object.assign(panel.style, { left: left + "px", top: top + "px" });
-    }
+    privatePanel?.position(panelContext(p));
   }
   function renderWidget() {
     if (!shadow) return;
@@ -590,7 +566,7 @@
       button.dataset.action = "peek";
       button.dataset.id = note.id;
       button.textContent = String(index + 1).padStart(2, "0");
-      button.setAttribute("aria-label", `查看评注 ${index + 1}：${note.label}`);
+      button.setAttribute("aria-label", `查看评注 ${index + 1}`);
       Object.assign(button.style, {
         left:
           Math.max(4, Math.min(innerWidth - 29, r.left - 12 + count * 26)) +
@@ -619,27 +595,15 @@
   }
   function feedbackMarkup(note) {
     return note.feedback
-      ? `<span class="feedback-value ${note.feedback}" role="img" aria-label="${note.feedback === "positive" ? "点赞" : "点踩"}">${icon(note.feedback === "positive" ? "like" : "dislike")}</span>`
+      ? `<span class="feedback-value ${esc(note.feedback)}" role="img" aria-label="${note.feedback === "positive" ? "点赞" : "点踩"}">${icon(note.feedback === "positive" ? "like" : "dislike")}</span>`
       : "";
   }
-  function updateComposer() {
-    const input = shadow?.getElementById("review-comment");
-    if (!input || !state.draft) return;
-    input.style.height = "auto";
-    input.style.height = Math.max(26, Math.min(144, input.scrollHeight)) + "px";
-    shadow.querySelectorAll('[data-action="feedback"]').forEach((button) => {
-      const selected = state.draft.note.feedback === button.dataset.feedback;
-      button.classList.toggle("selected", selected);
-      button.setAttribute("aria-pressed", String(selected));
-    });
-    const save = shadow.querySelector(".composer-submit");
-    if (save)
-      save.disabled =
-        state.busy ||
-        !(input.value.trim() || state.draft.note.feedback) ||
-        (!state.draft.note.id &&
-          !state.draft.asset &&
-          !state.draft.allowWithoutImage);
+  function composerState() {
+    const d = state.draft;
+    return d && {
+      canSave: !state.busy && Boolean(d.note.id || d.asset || d.allowWithoutImage),
+      feedback: d.note.feedback,
+    };
   }
   const clock = (s) =>
     Math.floor((s || 0) / 60) +
@@ -656,7 +620,7 @@
     const asset = d.asset;
     if (!asset)
       return `<div class="media-empty">${state.busy ? "正在截图…" : d.allowWithoutImage ? "仅评注" : d.error ? esc(d.error) : "截图尚未完成"}${!state.busy ? '<button class="text-button" data-action="retry">' + (d.error ? "重试" : "添加截图") + "</button>" : ""}${!d.allowWithoutImage && !state.busy ? '<button class="text-button" data-action="allow-text">仅保存评注</button>' : ""}</div>`;
-    return `<div class="draft-media">${asset.video ? `<video src="${asset.video}" poster="${asset.viewport}" controls muted playsinline></video><div class="media-duration">${clock(asset.recording.duration)}</div>` : `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${asset.crop || asset.viewport}" alt="截图"></button>`}${asset.frames?.length ? `<div class="keyframes">${asset.frames.map((f, i) => `<button data-action="seek-frame" data-index="${i}" aria-label="跳转 ${clock(f.at)}"><img src="${f.data}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}<div class="media-tools">${asset.video ? '<button data-action="retake-record">重录</button><button data-action="reselect-video">重选区域</button>' : '<button data-action="retry">重拍</button>'}<button data-action="remove-media">移除</button></div></div>`;
+    return `<div class="draft-media">${asset.video ? `<video src="${esc(asset.video)}" poster="${esc(asset.viewport)}" controls muted playsinline></video><div class="media-duration">${clock(asset.recording.duration)}</div>` : `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${esc(asset.crop || asset.viewport)}" alt="截图"></button>`}${asset.frames?.length ? `<div class="keyframes">${asset.frames.map((f) => `<button data-action="seek-frame" data-at="${Number(f.at)}" aria-label="跳转 ${clock(f.at)}"><img src="${esc(f.data)}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}<div class="media-tools">${asset.video ? '<button data-action="retake-record">重录</button><button data-action="reselect-video">重选区域</button>' : '<button data-action="retry">重拍</button>'}<button data-action="remove-media">移除</button></div></div>`;
   }
   function connectionMarkup() {
     const c = state.cloud || {},
@@ -690,15 +654,15 @@
     else if (state.panel === "editor" && d)
       html = `<section class="panel editor popover v4-composer" role="dialog" aria-label="添加评注" aria-busy="${state.busy}"><header class="popover-head"><span>${esc(d.note.label || "评注")}</span><button class="icon-btn" data-action="cancel-draft" aria-label="取消评注">${icon("close")}</button></header>${d.note.id ? "" : draftMedia(d)}<textarea id="review-comment" aria-label="评注内容" placeholder="添加评注…" maxlength="12000">${esc(d.note.comment)}</textarea>${d.error && d.asset ? `<p class="inline-error" role="alert">${esc(d.error)}</p>` : ""}<footer class="composer-bottom"><div class="feedback-actions">${["positive", "negative"].map((v) => `<button class="feedback-button" data-action="feedback" data-feedback="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${d.note.feedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}</div><button class="btn primary composer-submit" data-action="save">保存</button></footer></section>`;
     else if (state.panel === "notes")
-      html = `<div class="drawer-backdrop" data-action="minimize"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="本页评注"><header class="drawer-head"><h2>本页评注</h2><button class="icon-btn" data-action="minimize" aria-label="关闭本页评注">${icon("close")}</button></header><div class="drawer-content">${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}</p>` : ""}${state.notes.length ? state.notes.map((n, i) => `<article class="drawer-note"><div class="saved-head"><span>${feedbackMarkup(n)}${esc(n.label)}</span><time>${date(n.createdAt)}</time></div><p>${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${n.id}">${n.hasVideo ? "播放录制" : n.hasImage ? "查看截图" : "查看评注"}</button><button data-action="edit" data-id="${n.id}">修改</button><button data-action="locate" data-id="${n.id}">定位</button><button data-action="delete" data-id="${n.id}">删除</button></div></article>`).join("") : '<div class="empty-state">本页还没有评注</div>'}</div><footer class="drawer-footer"><span>${state.notes.length} 条</span>${copyMarkup()}</footer></aside>`;
+      html = `<div class="drawer-backdrop" data-action="minimize"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="本页评注"><header class="drawer-head"><h2>本页评注</h2><button class="icon-btn" data-action="minimize" aria-label="关闭本页评注">${icon("close")}</button></header><div class="drawer-content">${state.pageError ? `<p class="inline-error" role="alert">${esc(state.pageError)}</p>` : ""}${state.notes.length ? state.notes.map((n, i) => `<article class="drawer-note"><div class="saved-head"><span>${feedbackMarkup(n)}${esc(n.label)}</span><time>${date(n.createdAt)}</time></div><p>${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="peek" data-id="${esc(n.id)}">${n.hasVideo ? "播放录制" : n.hasImage ? "查看截图" : "查看评注"}</button><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="locate" data-id="${esc(n.id)}">定位</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div></article>`).join("") : '<div class="empty-state">本页还没有评注</div>'}</div><footer class="drawer-footer"><span>${state.notes.length} 条</span>${copyMarkup()}</footer></aside>`;
     else if (state.panel === "peek" && state.peek) {
       const n = state.notes.find((n) => n.id === state.peek.id),
         a = state.peek.asset;
       if (n)
-        html = `<div class="drawer-backdrop" data-action="close-peek"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="评注详情"><header class="drawer-head"><h2>评注详情</h2><button class="icon-btn" data-action="close-peek" aria-label="关闭详情">${icon("close")}</button></header><div class="drawer-content"><div class="saved-head"><a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(n.url).hostname)}</a><time>${date(n.createdAt)}</time></div>${feedbackMarkup(n)}<p class="detail-comment">${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="edit" data-id="${n.id}">修改</button><button data-action="delete" data-id="${n.id}">删除</button></div>${a?.video ? `<video class="saved-video" src="${a.video}" poster="${a.viewport}" controls muted playsinline></video>${a.frames?.length ? `<div class="keyframes">${a.frames.map((f, i) => `<button data-action="seek-frame" data-index="${i}" aria-label="跳转 ${clock(f.at)}"><img src="${f.data}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}` : a?.viewport ? `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${a.viewport}" alt="截图"></button>` : ""}</div></aside>`;
+        html = `<div class="drawer-backdrop" data-action="close-peek"></div><aside class="panel drawer notes-panel" role="dialog" aria-modal="true" aria-label="评注详情"><header class="drawer-head"><h2>评注详情</h2><button class="icon-btn" data-action="close-peek" aria-label="关闭详情">${icon("close")}</button></header><div class="drawer-content"><div class="saved-head"><a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${esc(new URL(n.url).hostname)}</a><time>${date(n.createdAt)}</time></div>${feedbackMarkup(n)}<p class="detail-comment">${esc(n.comment)}</p><div class="drawer-note-actions"><button data-action="edit" data-id="${esc(n.id)}">修改</button><button data-action="delete" data-id="${esc(n.id)}">删除</button></div>${a?.video ? `<video class="saved-video" src="${esc(a.video)}" poster="${esc(a.viewport)}" controls muted playsinline></video>${a.frames?.length ? `<div class="keyframes">${a.frames.map((f) => `<button data-action="seek-frame" data-at="${Number(f.at)}" aria-label="跳转 ${clock(f.at)}"><img src="${esc(f.data)}" alt=""><time>${clock(f.at)}</time></button>`).join("")}</div>` : ""}` : a?.viewport ? `<button class="image-preview" data-action="expand-media" aria-label="放大截图"><img src="${esc(a.viewport)}" alt="截图"></button>` : ""}</div></aside>`;
     } else if (state.panel === "media") {
       const a = state.draft?.asset || state.peek?.asset;
-      html = `<div class="drawer-backdrop" data-action="close-media"></div><section class="panel media-view" role="dialog" aria-modal="true" aria-label="截图">${panelHead("截图")}<button class="icon-btn media-close" data-action="close-media" aria-label="关闭截图">${icon("close")}</button><img src="${a?.viewport || ""}" alt="截图"></section>`;
+      html = `<div class="drawer-backdrop" data-action="close-media"></div><section class="panel media-view" role="dialog" aria-modal="true" aria-label="截图">${panelHead("截图")}<button class="icon-btn media-close" data-action="close-media" aria-label="关闭截图">${icon("close")}</button><img src="${esc(a?.viewport || "")}" alt="截图"></section>`;
     } else if (state.panel === "record" && state.record) {
       const r = state.record;
       html = `<section class="panel recording-control" role="dialog" aria-label="区域录制"><span>${r.phase === "recording" ? '<i class="record-dot"></i> 录制中' : r.phase === "waiting" ? "点击工具栏图标以允许录制" : r.phase === "starting" ? "正在启动…" : r.phase === "stopping" ? "正在处理…" : "区域录制"}</span>${r.phase === "recording" ? '<button class="btn primary small" data-action="stop-record">停止</button>' : ["ready", "failed"].includes(r.phase) ? '<button class="btn small" data-action="reselect-record">重选</button><button class="btn primary small" data-action="start-record">' + (r.phase === "failed" ? "重试" : "开始") + "</button>" : ""}<button class="icon-btn" data-action="cancel-record" aria-label="取消录制">${icon("close")}</button>${r.error ? `<p class="inline-error" role="alert">${esc(r.error)}</p>` : ""}</section>`;
@@ -709,18 +673,7 @@
       html = `<section class="panel setup-panel" role="dialog" aria-label="手动复制">${panelHead("手动复制")}<div class="setup-body"><textarea id="manual-copy" readonly aria-label="评注提示词">${esc(state.copyText)}</textarea></div></section>`;
     else if (state.panel === "confirm-close")
       html = `<section class="panel confirm-panel" role="dialog" aria-label="未保存评注"><div class="confirm-body"><h3>这条评注尚未保存</h3><button class="btn" data-action="resume-draft">继续编辑</button><button class="btn danger" data-action="discard-disable">放弃并关闭</button></div></section>`;
-    shadow.getElementById("panel").innerHTML = html;
-    updateComposer();
-    positionWidget();
-    shadow
-      .querySelectorAll("img,video")
-      .forEach((el) =>
-        el.addEventListener(
-          el.tagName === "VIDEO" ? "loadedmetadata" : "load",
-          positionWidget,
-          { once: true },
-        ),
-      );
+    privatePanel.render(html, panelContext(), { focus, composer: composerState() });
     if (state.record) {
       shadow.querySelector(".record-boundary")?.remove();
       const r = state.record.rect,
@@ -733,27 +686,11 @@
         height: r.height + "px",
       });
       shadow.getElementById("selection").append(b);
-      const c = shadow.querySelector(".recording-control"),
-        pos = PageReviewMedia.controls(r, state.record.viewport, {
-          width: Math.min(310, innerWidth - 24),
-          height: c?.getBoundingClientRect().height || 48,
-        });
-      if (c && pos)
-        Object.assign(c.style, { left: pos.left + "px", top: pos.top + "px" });
     } else shadow.querySelector(".record-boundary")?.remove();
     const rect = currentAnchor();
     if (rect) highlight(rect, d?.note.type === "region" ? 0 : 5);
     else if (state.mode === "browse") highlight(null);
-    if (focus && state.panel === "editor") {
-      const input = shadow.getElementById("review-comment");
-      input?.focus({ preventScroll: true });
-      input?.setSelectionRange(input.value.length, input.value.length);
-    }
-    if (state.panel === "copy-fallback") {
-      const input = shadow.getElementById("manual-copy");
-      input.focus();
-      input.select();
-    }
+
   }
 
   function toast(message) {
@@ -786,7 +723,7 @@
       return;
     }
     state.panel = null;
-    state.mode = "browse";
+    setMode("browse");
     state.hover = null;
     state.rebind = null;
     highlight(null);
@@ -796,6 +733,21 @@
     renderMarkers();
     await send("SAVE_DOCK", { dock: state.dock });
   }
+  function setMode(mode) {
+    state.mode = mode;
+    const selecting = mode === "area" || mode === "record-area";
+    if (selecting && !regionCursorSheet) {
+      regionCursorSheet = new CSSStyleSheet();
+      // Keep page hit testing intact so region anchors still resolve underneath.
+      regionCursorSheet.replaceSync(':root, :root *:not(#page-review-overlay) { cursor: crosshair !important; }');
+      document.adoptedStyleSheets.push(regionCursorSheet);
+    } else if (!selecting && regionCursorSheet) {
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+        (sheet) => sheet !== regionCursorSheet,
+      );
+      regionCursorSheet = null;
+    }
+  }
   function enter(mode) {
     if (state.draft) {
       state.panel = "editor";
@@ -803,7 +755,7 @@
       toast("先保存或取消当前评注");
       return;
     }
-    state.mode = mode;
+    setMode(mode);
     state.panel = null;
     state.hover = null;
     renderWidget();
@@ -857,7 +809,7 @@
   }
   async function begin(type, target, rect, region = null) {
     if (state.busy || state.draft) return;
-    state.mode = "browse";
+    setMode("browse");
     state.hover = null;
     highlight(null);
     state.panel = null;
@@ -900,12 +852,6 @@
   async function save(keepSelecting) {
     const draft = state.draft;
     if (!draft || state.busy) return;
-    draft.note.comment =
-      shadow.getElementById("review-comment")?.value ?? draft.note.comment;
-    draft.allowWithoutImage =
-      shadow.getElementById("allow-text")?.checked ||
-      draft.allowWithoutImage ||
-      false;
     state.busy = true;
     renderPanel();
     try {
@@ -918,7 +864,7 @@
       });
       state.draft = null;
       state.panel = null;
-      state.mode = keepSelecting ? "point" : "browse";
+      setMode(keepSelecting ? "point" : "browse");
       operation++;
       await loadNotes();
       renderPanel();
@@ -963,18 +909,17 @@
       match.element.scrollIntoView({ block: "center", behavior: "instant" });
     peek(id).catch((error) => toast(error.message));
   }
-  async function action(event) {
-    const button = event.target.closest("[data-action]");
-    if (!button) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const name = button.dataset.action;
+  async function action(dataset) {
+    const name = dataset.action;
     if (name === "toggle" && performance.now() < suppressClick) return;
     if (state.busy) return;
     try {
       switch (name) {
         case "toggle":
-          if (!state.panel) await refreshPageState();
+          if (!state.panel) {
+            await loadNotes();
+            refreshPageState().catch((e) => toast(e.message));
+          }
           state.panel = state.panel ? null : state.draft ? "editor" : "menu";
           renderPanel(Boolean(state.draft));
           renderWidget();
@@ -1012,17 +957,6 @@
           }
           enter("record-area");
           break;
-        case "seek-frame": {
-          const a =
-              state.panel === "peek" ? state.peek?.asset : state.draft?.asset,
-            f = a?.frames?.[Number(button.dataset.index)],
-            video = shadow.querySelector("video");
-          if (f && video) {
-            video.currentTime = f.at;
-            await video.play();
-          }
-          break;
-        }
         case "settings":
           state.cloud = await send("CLOUD_SETUP");
           state.panel = "settings";
@@ -1085,7 +1019,7 @@
           state.recordSeed = record?.seed;
           state.record = null;
           state.panel = null;
-          state.mode = "record-area";
+          setMode("record-area");
           renderPanel();
           renderWidget();
           break;
@@ -1139,7 +1073,7 @@
           await discardDraft();
           break;
         case "delete":
-          state.confirm = { kind: "delete", id: button.dataset.id };
+          state.confirm = { kind: "delete", id: dataset.id };
           state.panel = "confirm";
           renderPanel();
           break;
@@ -1158,7 +1092,7 @@
           } else await begin("page", null, null);
           break;
         case "finish":
-          state.mode = "browse";
+          setMode("browse");
           state.hover = null;
           highlight(null);
           renderWidget();
@@ -1176,7 +1110,7 @@
             break;
           }
           state.panel = "notes";
-          state.mode = "browse";
+          setMode("browse");
           highlight(null);
           renderPanel();
           renderMarkers();
@@ -1187,10 +1121,10 @@
         case "feedback":
           if (state.draft) {
             state.draft.note.feedback =
-              state.draft.note.feedback === button.dataset.feedback
+              state.draft.note.feedback === dataset.feedback
                 ? null
-                : button.dataset.feedback;
-            updateComposer();
+                : dataset.feedback;
+            privatePanel.composer(composerState());
           }
           break;
         case "retry":
@@ -1241,13 +1175,13 @@
           renderPanel();
           break;
         case "peek":
-          await peek(button.dataset.id);
+          await peek(dataset.id);
           break;
         case "locate":
-          locate(button.dataset.id);
+          locate(dataset.id);
           break;
         case "edit": {
-          const note = state.notes.find((n) => n.id === button.dataset.id);
+          const note = state.notes.find((n) => n.id === dataset.id);
           if (!note) break;
           const match = state.matches.get(note.id);
           state.draft = {
@@ -1261,7 +1195,7 @@
           break;
         }
         case "rebind":
-          state.rebind = button.dataset.id;
+          state.rebind = dataset.id;
           enter("point");
           break;
       }
@@ -1271,11 +1205,12 @@
   }
   function orbDown(event) {
     const orb = event.target.closest(".orb");
-    if (!orb || event.button !== 0 || state.busy) return;
+    if (!event.isTrusted || !orb || event.button !== 0 || state.busy) return;
     const r = orb.getBoundingClientRect();
     drag = {
       x: r.left,
       y: r.top,
+      pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       moved: false,
@@ -1285,7 +1220,7 @@
   }
   function pointerDown(event) {
     if (
-      own(event) ||
+      !event.isTrusted || own(event) ||
       !["area", "record-area"].includes(state.mode) ||
       event.button !== 0 ||
       state.draft ||
@@ -1294,23 +1229,28 @@
       return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    regionDrag = { x: event.clientX, y: event.clientY };
+    regionDrag = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     document.documentElement.setPointerCapture?.(event.pointerId);
   }
   function pointerMove(event) {
+    if (!event.isTrusted) return;
     if (drag) {
+      if (drag.pointerId !== event.pointerId) return;
       const dx = event.clientX - drag.startX,
         dy = event.clientY - drag.startY;
       if (Math.hypot(dx, dy) < 5 && !drag.moved) return;
       drag.moved = true;
       drag.el.classList.add("is-dragging");
       drag.el.setAttribute("aria-expanded", "false");
-      state.panel = null;
-      shadow.getElementById("panel").replaceChildren();
+      if (state.panel) {
+        state.panel = null;
+        renderPanel();
+      }
       positionWidget({ x: drag.x + dx, y: drag.y + dy });
       return;
     }
     if (regionDrag) {
+      if (regionDrag.pointerId !== event.pointerId) return;
       highlight(
         {
           left: Math.min(regionDrag.x, event.clientX),
@@ -1330,7 +1270,8 @@
       highlight(target.getBoundingClientRect());
     }
   }
-  function cancelPointer() {
+  function cancelPointer(event) {
+    if (!event.isTrusted || (drag || regionDrag)?.pointerId !== event.pointerId) return;
     drag?.el.classList.remove("is-dragging");
     drag = null;
     regionDrag = null;
@@ -1338,7 +1279,9 @@
     positionWidget();
   }
   function pointerUp(event) {
+    if (!event.isTrusted) return;
     if (drag) {
+      if (drag.pointerId !== event.pointerId) return;
       drag.el.classList.remove("is-dragging");
       if (drag.moved) {
         const r = shadow.querySelector(".orb-wrap").getBoundingClientRect();
@@ -1355,7 +1298,7 @@
       positionWidget();
       return;
     }
-    if (!regionDrag) return;
+    if (!regionDrag || regionDrag.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     const start = regionDrag;
@@ -1407,7 +1350,7 @@
     );
   }
   function selectClick(event) {
-    if (own(event)) return;
+    if (!event.isTrusted || own(event)) return;
     if (performance.now() < suppressClick) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -1421,7 +1364,7 @@
     if (state.rebind) {
       const id = state.rebind;
       state.rebind = null;
-      state.mode = "browse";
+      setMode("browse");
       highlight(null);
       send("REBIND", {
         id,
@@ -1447,7 +1390,7 @@
         state.draft = state.previousDraft;
         state.previousDraft = null;
         state.recordSeed = null;
-        state.mode = "browse";
+        setMode("browse");
         state.panel = "editor";
         renderPanel(true);
         renderWidget();
@@ -1470,7 +1413,7 @@
         return;
       }
       if (state.busy) return;
-      state.mode = "browse";
+      setMode("browse");
       state.panel = null;
       state.hover = null;
       state.rebind = null;
@@ -1516,7 +1459,7 @@
     state.pageError = "";
     renderPanel();
     try {
-      if (login) await send("CLOUD_LOGIN");
+      if (login) await send("CLOUD_LOGIN", { resume: "copy" });
       const fixed = await send("CREATE_HANDOFF");
       await loadNotes();
       state.copyText = fixed.text;
@@ -1552,7 +1495,7 @@
     state.draft = null;
     state.confirm = null;
     state.panel = null;
-    state.mode = "browse";
+    setMode("browse");
     renderPanel();
     renderWidget();
   }
@@ -1595,7 +1538,7 @@
             },
       };
       state.recordSeed = null;
-      state.mode = "browse";
+      setMode("browse");
       state.panel = "record";
       highlight(null);
       renderPanel();
@@ -1660,7 +1603,7 @@
     r.phase = "cancelling";
     state.record = null;
     state.panel = null;
-    state.mode = "browse";
+    setMode("browse");
     if (!["ready", "failed"].includes(previous))
       await send("RECORD_CANCEL").catch(() => {});
     if (state.previousDraft) {
@@ -1751,6 +1694,12 @@
     if (message?.type === "PAGE_REVIEW_RECORD_EVENT")
       recordEvent(message).catch((e) => toast(e.message));
     if (message?.type === "PAGE_REVIEW_SETTINGS_CHANGED") refresh();
+    if (message?.type === "PAGE_REVIEW_LOGIN_RESULT") {
+      if (message.ok && message.resume === "copy") {
+        state.copying = false;
+        copyPage().catch((e) => toast(e.message));
+      } else if (!message.ok) toast(message.error);
+    }
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && "enabled" in changes) refresh();

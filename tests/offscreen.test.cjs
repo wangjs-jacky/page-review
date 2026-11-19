@@ -2,7 +2,7 @@ const { test } = require("node:test"), assert = require("node:assert/strict");
 const vm = require("node:vm"), fs = require("node:fs"), path = require("node:path");
 const crypto = require("node:crypto"), Media = require("../extension/media.js");
 
-function hiddenDocument() {
+function hiddenDocument({ acquire, store } = {}) {
   let listener, source, clock = 0, written;
   const frames = [], drafts = [], notifications = [], timers = new Set();
   class Track {
@@ -61,14 +61,18 @@ function hiddenDocument() {
   const context = vm.createContext({
     chrome: { runtime: { id: "test", onMessage: { addListener(fn) { listener = fn; } },
       sendMessage: async message => { notifications.push(message); } } },
-    navigator: { mediaDevices: { getUserMedia: async () => new Stream([input]) } },
+    navigator: { mediaDevices: { getUserMedia: async () => { await acquire; return new Stream([input]); } } },
     // No visible video element, rAF or video-frame callback exists in this fixture.
     document: { createElement(tag) { assert.equal(tag, "canvas"); return canvas; } },
     MediaStreamTrackProcessor: Processor, MediaStreamTrackGenerator: Generator,
     MediaStream: Stream, VideoFrame: Frame, MediaRecorder: Recorder, FileReader: Reader,
     PageReviewMedia: Media,
     PageReviewDB: {
-      putDraft: async draft => { drafts.push(draft); }, deleteDraft: async () => {},
+      putDraft: async draft => { await store?.(); drafts.push(draft); },
+      deleteDraft: async id => {
+        const index = drafts.findIndex(draft => draft.id === id);
+        if (index !== -1) drafts.splice(index, 1);
+      },
     },
     performance: { now: () => clock }, crypto, Blob, ReadableStream, WritableStream,
     TransformStream, AbortController, Date, console, queueMicrotask,
@@ -79,7 +83,7 @@ function hiddenDocument() {
     frames, drafts, notifications, input, timers,
     cancelled: () => sourceCancelled, output: () => output,
     clock: value => { clock = value; },
-    call: command => new Promise(resolve => listener({ target: "offscreen", command,
+    call: (command, sessionId = "one") => new Promise(resolve => listener({ target: "offscreen", command, sessionId,
       streamId: "native-stream", tabId: 1, pageUrl: "https://example.com/guide",
       rect: { left: 100, top: 100, width: 300, height: 200 }, viewport: { width: 1000, height: 500 },
     }, { id: "test" }, resolve)),
@@ -120,4 +124,54 @@ test("未收到源帧时拒绝空录制并清理输入输出轨道和等待中�
   assert.equal(t.drafts.length, 0); assert.equal(t.cancelled(), true);
   assert.equal(t.input.stopped, true); assert.equal(t.output().stopped, true);
   assert.equal(t.timers.size, 0);
+});
+
+
+test("取消正在录制的会话立即释放原生轨道，无需等待 WebM 收尾", async () => {
+  const t = hiddenDocument();
+  assert.equal((await t.call("START")).ok, true);
+  await t.push("captured", 0);
+  t.clock(600);
+  const cancelled = t.call("CANCEL");
+  assert.equal(t.input.stopped, true);
+  assert.equal(t.output().stopped, true);
+  assert.equal(t.timers.size, 0);
+  assert.equal((await cancelled).ok, true);
+  await new Promise(setImmediate);
+  assert.equal(t.drafts.length, 0);
+  assert.deepEqual(t.notifications.map((m) => m.event), ["STARTED"]);
+});
+
+test("等待 Chrome 交付轨道时取消，迟到的轨道立即释放", async () => {
+  let release;
+  const acquire = new Promise(resolve => { release = resolve; });
+  const t = hiddenDocument({ acquire });
+  const starting = t.call("START");
+  assert.equal((await t.call("CANCEL")).ok, true);
+  release();
+  assert.equal((await starting).ok, false);
+  assert.equal(t.input.stopped, true);
+  assert.equal(t.output(), undefined);
+  assert.deepEqual(t.notifications, []);
+});
+
+test("保存草稿进行中取消，只删除该次正在收尾的录制", { timeout: 1000 }, async () => {
+  let release, entered;
+  const storing = new Promise(resolve => { entered = resolve; });
+  const t = hiddenDocument({ store: () => new Promise(resolve => { release = resolve; entered(); }) });
+  t.drafts.push({ id: "existing-draft" });
+  assert.equal((await t.call("START")).ok, true);
+  await t.push("captured", 0);
+  t.clock(600);
+  const stopping = t.call("STOP");
+  await storing;
+  assert.equal((await t.call("CANCEL", "different")).ok, true);
+  assert.equal(t.input.stopped, undefined);
+  assert.equal((await t.call("CANCEL")).ok, true);
+  assert.equal(t.input.stopped, true);
+  release();
+  assert.equal((await stopping).ok, false);
+  await new Promise(setImmediate);
+  assert.deepEqual(t.drafts.map(draft => draft.id), ["existing-draft"]);
+  assert.deepEqual(t.notifications.map((m) => m.event), ["STARTED"]);
 });

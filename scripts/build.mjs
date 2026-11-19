@@ -15,10 +15,14 @@ const files = [
   "db.js",
   "background.js",
   "content.js",
+  "private-panel.js",
+  "panel.html",
+  "private-panel-frame.js",
   "library.html",
   "library.css",
   "library.js",
   "cloud.js",
+  "login-tabs.js",
   "cloud-config.js",
   "media.js",
   "recorder.js",
@@ -66,7 +70,9 @@ const builtManifest = {
     ? {
         name: "Page Review · 开发验收",
         host_permissions: ["http://127.0.0.1/*"],
-        web_accessible_resources: [{ resources:["icons/48.png"], matches:["http://127.0.0.1/*"] }],
+        web_accessible_resources: manifest.web_accessible_resources.map((entry) => ({
+          ...entry, matches: ["http://127.0.0.1/*"],
+        })),
       }
     : {}),
   content_security_policy: {
@@ -85,6 +91,7 @@ await fs.writeFile(
   "globalThis.PageReviewCloudConfig = " +
     JSON.stringify({
       apiOrigin: selectedOrigin,
+      loginOrigin: "https://ba-login.paws.rodeo",
       ...(isDev ? { pageOrigins: ["http://127.0.0.1/*"] } : {}),
     }) +
     ";\n",

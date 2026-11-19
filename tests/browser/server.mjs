@@ -82,6 +82,39 @@ try {
 } catch (e) {
   if (e.code !== "ENOENT") throw e;
 }
+const panelAssets = new Set([
+  "panel.html", "private-panel-frame.js", "core.js", "media.js", "content-style.js",
+]);
+async function contentStyles() {
+  return "globalThis.PageReviewStyles=" +
+    JSON.stringify(await fs.readFile(path.join(root, "extension/content.css"), "utf8")) + ";";
+}
+const panelServer = http.createServer(async (req, res) => {
+  try {
+    const name = new URL(req.url, origin).pathname.slice(1);
+    if (!panelAssets.has(name) && name !== "panel-adapter.js") {
+      res.writeHead(404).end();
+      return;
+    }
+    res.setHeader("cache-control", "no-store");
+    if (name === "panel.html") {
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.setHeader("content-security-policy", "script-src 'self'; style-src 'self'; img-src data:; media-src data:; object-src 'none'");
+      const html = await fs.readFile(path.join(root, "extension", name), "utf8");
+      res.end(html.replace("</head>", '<script src="panel-adapter.js"></script></head>'));
+    } else {
+      res.setHeader("content-type", "application/javascript; charset=utf-8");
+      if (name === "panel-adapter.js")
+        res.end('globalThis.chrome={runtime:{sendMessage:async()=>({ok:true})}};');
+      else if (name === "content-style.js") res.end(await contentStyles());
+      else res.end(await fs.readFile(path.join(root, "extension", name)));
+    }
+  } catch {
+    res.writeHead(500).end();
+  }
+});
+await new Promise((resolve) => panelServer.listen(0, "127.0.0.1", resolve));
+const panelOrigin = "http://127.0.0.1:" + panelServer.address().port;
 const scripts = [
   "/test-config.js",
   "/bridge.js",
@@ -97,7 +130,7 @@ const scripts = [
 const tags = scripts
   .map((src) => `<script src="${src}" defer></script>`)
   .join("");
-const fixture = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>阅读与导航 · 合成验收页</title><style>body{margin:0;background:#fbfcf9;color:#355f51;font:17px/1.85 -apple-system,sans-serif}header,main{max-width:950px;margin:auto;padding:28px}header{border-bottom:1px solid #dce7dc;font:28px Georgia}main{padding-top:60px;display:grid;grid-template-columns:1fr 180px;gap:60px}h1{font:38px Georgia}h2{font-size:24px}section{padding:25px 0}.map{display:flex;background:#edf2e9;padding:20px;gap:20px}.map button{font:inherit;background:white;border:1px solid #dce7dc;padding:20px;cursor:pointer;color:inherit}.map button.active{background:#356450;color:white}aside{border-left:1px solid #dce7dc;padding:12px 22px;height:260px}a{color:inherit}p{color:#71887b}.kicker{font-size:12px;letter-spacing:2px}#feedback{font-size:13px;min-height:30px}</style>${tags}<script src="/content-style.js" defer></script><script src="/content.js" defer></script></head><body><header>fieldnotes.</header><main><article><span class="kicker">DESIGN NOTES / READING</span><h1 id="target-title">让好内容，更容易被找到。</h1><p>把入口安排在用户的问题旁边。</p><div class="map"><button id="nav-one">找到入口</button><button id="nav-two">就近反馈</button><button id="nav-three">继续阅读</button></div><p id="feedback"></p><section><h2>给阅读一条路</h2><p>目录让读者知道自己在哪里，关联内容让人知道接着读什么。</p></section><section><h2>沿着这个话题，继续读</h2><p>保留必要的来源，让内容可以重新被使用。</p></section></article><aside><strong>本篇目录</strong><p>找到阅读入口</p><p>给阅读一条路</p></aside></main><script src="/fixture-actions.js"></script></body></html>`;
+const fixture = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>阅读与导航 · 合成验收页</title><style>body{margin:0;background:#fbfcf9;color:#355f51;font:17px/1.85 -apple-system,sans-serif}header,main{max-width:950px;margin:auto;padding:28px}header{border-bottom:1px solid #dce7dc;font:28px Georgia}main{padding-top:60px;display:grid;grid-template-columns:1fr 180px;gap:60px}h1{font:38px Georgia}h2{font-size:24px}section{padding:25px 0}.map{display:flex;background:#edf2e9;padding:20px;gap:20px}.map button{font:inherit;background:white;border:1px solid #dce7dc;padding:20px;cursor:pointer;color:inherit}.map button.active{background:#356450;color:white}aside{border-left:1px solid #dce7dc;padding:12px 22px;height:260px}a{color:inherit}p{color:#71887b}.kicker{font-size:12px;letter-spacing:2px}#feedback{font-size:13px;min-height:30px}</style>${tags}<script src="/content-style.js" defer></script><script src="/private-panel.js" defer></script><script src="/content.js" defer></script></head><body><header>fieldnotes.</header><main><article><span class="kicker">DESIGN NOTES / READING</span><h1 id="target-title">让好内容，更容易被找到。</h1><p>把入口安排在用户的问题旁边。</p><div class="map"><button id="nav-one">找到入口</button><button id="nav-two">就近反馈</button><button id="nav-three">继续阅读</button></div><p id="feedback"></p><section><h2>给阅读一条路</h2><p>目录让读者知道自己在哪里，关联内容让人知道接着读什么。</p></section><section><h2>沿着这个话题，继续读</h2><p>保留必要的来源，让内容可以重新被使用。</p></section></article><aside><strong>本篇目录</strong><p>找到阅读入口</p><p>给阅读一条路</p></aside></main><script src="/fixture-actions.js"></script></body></html>`;
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, origin),
@@ -124,24 +157,20 @@ const server = http.createServer(async (req, res) => {
     if (/^\/icons\/(16|32|48|128)\.png$/.test(pathname)) { res.setHeader("content-type","image/png");res.end(await fs.readFile(path.join(root,"extension",pathname)));return; }
     let content,
       mime = "application/javascript; charset=utf-8";
-    if (pathname === "/reading") {
+    if (pathname === "/reading" || pathname.startsWith("/reading/")) {
       content = fixture;
       mime = "text/html; charset=utf-8";
     } else if (pathname === "/test-config.js")
       content =
-        "globalThis.__testConnection=" + JSON.stringify(connection) + ";";
+        "globalThis.__testConnection=" + JSON.stringify(connection) +
+        ";globalThis.__testPanelOrigin=" + JSON.stringify(panelOrigin) +
+        ";globalThis.__testInitialSenderUrl=location.href;";
     else if (pathname === "/cloud-config.js")
       content =
         "globalThis.PageReviewCloudConfig={apiOrigin:" +
         JSON.stringify(origin) +
         "};";
-    else if (pathname === "/content-style.js")
-      content =
-        "globalThis.PageReviewStyles=" +
-        JSON.stringify(
-          await fs.readFile(path.join(root, "extension/content.css"), "utf8"),
-        ) +
-        ";";
+    else if (pathname === "/content-style.js") content = await contentStyles();
     else if (pathname === "/fixture-actions.js")
       content =
         "document.querySelectorAll('.map button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.map button').forEach(x=>x.classList.toggle('active',x===b));document.getElementById('feedback').textContent=b.textContent+' · 内容已展开';});";

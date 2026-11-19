@@ -6,8 +6,10 @@
     fetcher = fetch,
     apiOrigin = root.PageReviewCloudConfig?.apiOrigin,
     identity = root.chrome?.identity,
+    tabLogin,
   }) {
     let chain = Promise.resolve();
+    let refreshChain = Promise.resolve();
     const failure = (message, code) => Object.assign(new Error(message), { code });
     const config = async () =>
       (await storage.get("cloudConnection")).cloudConnection || null;
@@ -115,10 +117,10 @@
       if (migrateExisting) await db.enroll(who.workspaceId);
       return status();
     }
-    async function login({ migrateExisting = false } = {}) {
+    async function login({ migrateExisting = false, sourceTab, resume } = {}) {
       if (
         !apiOrigin ||
-        !identity?.launchWebAuthFlow ||
+        (!tabLogin && !identity?.launchWebAuthFlow) ||
         !identity?.getRedirectURL
       )
         throw new Error("此安装包暂不能发起账号登录");
@@ -143,14 +145,33 @@
         code_challenge: challenge,
       }))
         start.searchParams.set(key, value);
+      if (tabLogin) {
+        const proof = b64(crypto.getRandomValues(new Uint8Array(32)));
+        const intentChallenge = b64(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(proof)));
+        return tabLogin.launch(async () => {
+          const response = await fetcher(apiOrigin + "/auth/extension/start", {
+            method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ callback, state, challenge, intentChallenge,
+              workspaceId: (await config())?.workspaceId }),
+          });
+          if (!response.ok) throw Error("登录服务暂不可用，请重新登录");
+          return { ...await response.json(), proof };
+        }, { verifier, state, callback, migrateExisting, resume, backgroundSync: true }, sourceTab);
+      }
       const returned = await identity.launchWebAuthFlow({
         url: start.href,
         interactive: true,
       });
+      return finishLogin({ verifier, state, callback, migrateExisting }, returned);
+    }
+    async function finishLogin({ verifier, state, callback, migrateExisting, resume, backgroundSync }, returned) {
       if (!returned) throw new Error("登录已取消，本机标注仍保留");
       const url = new URL(returned);
       if (
         url.origin + url.pathname !== callback ||
+        url.hash || url.searchParams.size !== 2 ||
+        [...url.searchParams.keys()].some(k => !["code", "state"].includes(k)) ||
         url.searchParams.get("state") !== state ||
         !/^[A-Za-z0-9_-]{43}$/.test(url.searchParams.get("code") || "")
       )
@@ -174,10 +195,24 @@
         ).catch(() => {});
         throw error;
       }
-      return sync();
+      // The original copy resumes without waiting for unrelated page uploads.
+      if (resume === "copy") return status();
+      if (!backgroundSync) return sync();
+      sync().catch(() => {});
+      return status();
     }
-    async function upload(c, image) {
-      const refs = [];
+    async function parallel(items, operation) {
+      let next = 0, error;
+      await Promise.all(Array.from({ length: Math.min(3, items.length) }, async () => {
+        while (!error && next < items.length) {
+          const item = items[next++];
+          try { await operation(item); } catch (e) { error ||= e; }
+        }
+      }));
+      if (error) throw error;
+    }
+    async function upload(c, image, uploaded) {
+      const refs = [], unique = new Map();
       if (!image) return refs;
       for (const role of [
         "viewport",
@@ -195,11 +230,7 @@
         if (!match) throw new Error("本机画面格式无效");
         const bytes = Uint8Array.from(atob(match[2]), (c) => c.charCodeAt(0)),
           id = await hash(bytes);
-        await request(c, "/v1/uploads/" + id, {
-          method: "PUT",
-          headers: { "Content-Type": match[1] },
-          body: bytes,
-        });
+        if (!uploaded.has(id)) unique.set(id, { data, mime: match[1] });
         const png =
           match[1] === "image/png" && bytes.length >= 24
             ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -211,6 +242,15 @@
           height: png ? png.getUint32(20) : image.height,
         });
       }
+      await parallel([...unique], async ([id, { data, mime }]) => {
+        // Decode only the active uploads; roles share one content-addressed object.
+        const match = data.slice(data.indexOf(",") + 1);
+        const bytes = Uint8Array.from(atob(match), (c) => c.charCodeAt(0));
+        await request(c, "/v1/uploads/" + id, {
+          method: "PUT", headers: { "Content-Type": mime }, body: bytes,
+        });
+        uploaded.add(id);
+      });
       return refs;
     }
     async function runBatch({ page, strict = false } = {}) {
@@ -227,6 +267,7 @@
       const entries = page
         ? pending.filter((entry) => entry.note.pageId === page)
         : pending.slice(0, 100);
+      const uploaded = new Set();
       let synced = 0,
         failed = 0,
         firstError;
@@ -246,7 +287,7 @@
             entry.kind === "delete"
               ? []
               : image
-                ? await upload(c, image)
+                ? await upload(c, image, uploaded)
                 : entry.note.cloud?.assets || [];
           const payload = {
             requestId: entry.requestId,
@@ -332,13 +373,24 @@
       await db.forkConflict(id, c.workspaceId, record, image);
       return sync();
     }
-    async function refreshLibrary(filters = {}) {
+    // Page and library reads share one order through their IndexedDB merge.
+    // Handoff can enqueue a refresh while holding the separate sync queue.
+    function queuedRefresh(operation) {
+      const work = refreshChain.then(operation);
+      refreshChain = work.catch(() => {});
+      return work;
+    }
+    function refreshLibrary(filters = {}) {
+      return queuedRefresh(() => readLibrary(filters));
+    }
+    async function readLibrary(filters) {
       const st = await status();
       if (!st.configured) return { complete: true, localOnly: true };
       const c = await config(),
         params = new URLSearchParams();
       for (const key of ["from", "to"])
         if (filters[key]) params.set(key, filters[key]);
+      const version = await db.refreshVersion(c.workspaceId);
       const remote = await request(c, "/v1/library?" + params);
       if (!remote.complete || !Array.isArray(remote.items))
         throw Error("历史尚未读取完整");
@@ -349,17 +401,21 @@
         pages.get(page).push(n);
       }
       for (const [page, items] of pages)
-        await db.importPage(page, items, c.workspaceId, false);
+        await db.importPage(page, items, c.workspaceId, version, false);
       return { complete: true };
     }
-    async function refreshPage(page) {
+    function refreshPage(page) {
+      return queuedRefresh(() => readPage(page));
+    }
+    async function readPage(page) {
       const st = await status();
       if (!st.configured) return { complete: true, localOnly: true };
       const c = await config(),
+        version = await db.refreshVersion(c.workspaceId),
         remote = await request(c, "/v1/pages?url=" + encodeURIComponent(page));
       if (!remote.complete || !Array.isArray(remote.items))
         throw Error("本页历史尚未读取完整");
-      await db.importPage(page, remote.items, c.workspaceId);
+      await db.importPage(page, remote.items, c.workspaceId, version);
       return { complete: true };
     }
     async function downloadAssets(c, record) {
@@ -471,7 +527,8 @@
         throw failure("请登录账号", "login_required");
       if ((await config())?.token !== c.token)
         throw failure("账号已变化，请重新复制", "account_mismatch");
-      await refreshPage(page);
+      // The handoff endpoint reads the complete current page and validates every
+      // local revision itself. A preceding GET adds latency and no stronger check.
       const notes = await db.list(page);
       if (notes.some((n) => n.cloud?.workspaceId !== c.workspaceId))
         throw failure("请登录保存这些评注的账号", "account_mismatch");
@@ -484,7 +541,9 @@
         (await db.pending(c.workspaceId)).some((n) => n.note.pageId === page)
       )
         throw failure("评注有变化，请重试", "page_changed");
-      const fixed = await request(c, "/v1/handoffs", {
+      let fixed;
+      try {
+        fixed = await request(c, "/v1/handoffs", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -495,6 +554,13 @@
           })),
         }),
       });
+      } catch (error) {
+        if (error.code !== "not_fully_synced") throw error;
+        // A stale revision is an explicit conflict response, not a query loop.
+        // Refresh once and let the same Retry action create a fresh snapshot.
+        await refreshPage(page);
+        throw failure("云端评注已有更新，已刷新，请重试复制", "page_changed");
+      }
       return {
         ...fixed,
         text:
@@ -506,6 +572,7 @@
       };
     }
     return {
+      finishLogin,
       restoreDeleted,
       refreshLibrary,
       refreshPage,
