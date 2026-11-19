@@ -73,7 +73,12 @@
         ) || null
     );
   }
-  const api = { region, crop, controls };
+  function activeControls(rect, viewport) {
+    const width = Math.min(310, viewport.width - 24);
+    if (width < 144) return null;
+    return controls(rect, viewport, { width, height: 48 });
+  }
+  const api = { region, crop, controls, activeControls };
   root.PageReviewMedia = api;
   if (typeof module !== "undefined") module.exports = api;
 })(globalThis);

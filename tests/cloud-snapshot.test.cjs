@@ -249,3 +249,24 @@ test("录制草稿 API 与云同步元数据的键隔离", async () => {
   await db.deleteDraft(draft.id);
   assert.equal(await db.draft(draft.id), undefined);
 });
+
+test("editing an imported annotation retains its remote-only attachment references", async () => {
+  const { db } = client();
+  const id = "remote-image";
+  const asset = { id: "historic-image", role: "viewport" };
+  await db.importPage(page, [{
+    ...record(id),
+    note: { ...note(id), hasImage: true },
+    assets: [asset],
+  }], workspace, await db.refreshVersion(workspace));
+  assert.equal(await db.asset(id), undefined);
+  await db.patch(id, (current) => ({
+    ...current,
+    comment: "修改后的正文",
+    revision: current.revision + 1,
+  }), workspace);
+  const [entry] = await db.pending(workspace);
+  assert.equal(entry.kind, "upsert");
+  assert.equal(entry.note.comment, "修改后的正文");
+  assert.equal(JSON.stringify(entry.note.cloud.assets), JSON.stringify([asset]));
+});

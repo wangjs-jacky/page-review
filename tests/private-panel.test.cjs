@@ -112,3 +112,44 @@ test("signing in from connection settings resumes the pending clipboard action",
   assert.equal(state.panel, "notes");
   assert.equal(state.copyResumePanel, null);
 });
+
+test("opening and closing the menu does not wait for list or cloud reads", async () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const action = source.slice(source.indexOf("  async function action("),
+    source.indexOf("\n  }", source.indexOf("  async function action(")) + 4);
+  const panels = [];
+  const state = { panel: null };
+  const never = new Promise(() => {});
+  const context = vm.createContext({
+    state,
+    loadNotes: () => never,
+    refreshPageState: () => never,
+    renderPanel: () => panels.push(state.panel),
+    renderWidget() {},
+    toast() {},
+    suppressClick: 0,
+    performance: { now: () => 1 },
+  });
+  await vm.runInContext(action + '\naction({ action: "toggle" })', context);
+  await vm.runInContext('action({ action: "toggle" })', context);
+  assert.deepEqual(panels, ["menu", null]);
+});
+
+test("取消重选会清除录制前的评论，继续重选时则保留", async () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const cut = (from, to) => source.slice(source.indexOf("  " + from), source.indexOf("  " + to));
+  const seed = { note: { comment: "录制前评论" } };
+  const state = { mode: "browse", panel: "record", record: { seed } };
+  const context = vm.createContext({
+    state, regionDrag: null, regionCursorSheet: {}, document: { adoptedStyleSheets: [] },
+    renderPanel() {}, renderWidget() {}, renderMarkers() {}, highlight() {}, toast() {},
+  });
+  vm.runInContext(cut("function setMode(", "function enter(") +
+    cut("async function action(", "function orbDown(") +
+    cut("function keyDown(", "async function clipboard("), context);
+  await vm.runInContext('action({ action: "reselect-record" })', context);
+  assert.equal(state.recordSeed, seed);
+  vm.runInContext('keyDown({ key: "Escape" })', context);
+  assert.equal(state.mode, "browse");
+  assert.equal(state.recordSeed, null);
+});

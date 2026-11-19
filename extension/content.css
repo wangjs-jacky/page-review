@@ -1621,6 +1621,23 @@ h3 {
   gap: 6px;
   align-items: center;
 }
+.recording-control-active {
+  max-width: none;
+  flex-wrap: nowrap;
+}
+.recording-control-active > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recording-control-active > button {
+  flex-shrink: 0;
+}
+.recording-control-active .record-dot {
+  margin-right: 6px;
+}
 .recording-control .btn {
   font-size: 11px;
   min-height: 28px;
@@ -1628,6 +1645,11 @@ h3 {
 .recording-control .icon-btn {
   width: 24px;
   height: 24px;
+}
+.recording-control textarea {
+  flex-basis: 100%;
+  min-width: 0;
+  resize: none;
 }
 .recording-control .inline-error {
   flex-basis: 100%;
