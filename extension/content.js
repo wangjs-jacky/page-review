@@ -61,6 +61,7 @@
     toastTimer,
     drag,
     regionDrag,
+    regionCursorSheet,
     suppressClick = 0,
     operation = 0,
     route = location.href;
@@ -381,7 +382,7 @@
     }
     state.record = null;
     state.recordSeed = null;
-    state.mode = "browse";
+    setMode("browse");
     state.panel = null;
     state.hover = null;
     state.rebind = null;
@@ -421,7 +422,7 @@
       renderPanel();
     } else {
       state.panel = null;
-      state.mode = "browse";
+      setMode("browse");
       renderPanel();
     }
     loadNotes().catch((error) => toast(error.message));
@@ -722,7 +723,7 @@
       return;
     }
     state.panel = null;
-    state.mode = "browse";
+    setMode("browse");
     state.hover = null;
     state.rebind = null;
     highlight(null);
@@ -732,6 +733,21 @@
     renderMarkers();
     await send("SAVE_DOCK", { dock: state.dock });
   }
+  function setMode(mode) {
+    state.mode = mode;
+    const selecting = mode === "area" || mode === "record-area";
+    if (selecting && !regionCursorSheet) {
+      regionCursorSheet = new CSSStyleSheet();
+      // Keep page hit testing intact so region anchors still resolve underneath.
+      regionCursorSheet.replaceSync(':root, :root *:not(#page-review-overlay) { cursor: crosshair !important; }');
+      document.adoptedStyleSheets.push(regionCursorSheet);
+    } else if (!selecting && regionCursorSheet) {
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+        (sheet) => sheet !== regionCursorSheet,
+      );
+      regionCursorSheet = null;
+    }
+  }
   function enter(mode) {
     if (state.draft) {
       state.panel = "editor";
@@ -739,7 +755,7 @@
       toast("先保存或取消当前评注");
       return;
     }
-    state.mode = mode;
+    setMode(mode);
     state.panel = null;
     state.hover = null;
     renderWidget();
@@ -793,7 +809,7 @@
   }
   async function begin(type, target, rect, region = null) {
     if (state.busy || state.draft) return;
-    state.mode = "browse";
+    setMode("browse");
     state.hover = null;
     highlight(null);
     state.panel = null;
@@ -848,7 +864,7 @@
       });
       state.draft = null;
       state.panel = null;
-      state.mode = keepSelecting ? "point" : "browse";
+      setMode(keepSelecting ? "point" : "browse");
       operation++;
       await loadNotes();
       renderPanel();
@@ -1003,7 +1019,7 @@
           state.recordSeed = record?.seed;
           state.record = null;
           state.panel = null;
-          state.mode = "record-area";
+          setMode("record-area");
           renderPanel();
           renderWidget();
           break;
@@ -1076,7 +1092,7 @@
           } else await begin("page", null, null);
           break;
         case "finish":
-          state.mode = "browse";
+          setMode("browse");
           state.hover = null;
           highlight(null);
           renderWidget();
@@ -1094,7 +1110,7 @@
             break;
           }
           state.panel = "notes";
-          state.mode = "browse";
+          setMode("browse");
           highlight(null);
           renderPanel();
           renderMarkers();
@@ -1348,7 +1364,7 @@
     if (state.rebind) {
       const id = state.rebind;
       state.rebind = null;
-      state.mode = "browse";
+      setMode("browse");
       highlight(null);
       send("REBIND", {
         id,
@@ -1374,7 +1390,7 @@
         state.draft = state.previousDraft;
         state.previousDraft = null;
         state.recordSeed = null;
-        state.mode = "browse";
+        setMode("browse");
         state.panel = "editor";
         renderPanel(true);
         renderWidget();
@@ -1397,7 +1413,7 @@
         return;
       }
       if (state.busy) return;
-      state.mode = "browse";
+      setMode("browse");
       state.panel = null;
       state.hover = null;
       state.rebind = null;
@@ -1479,7 +1495,7 @@
     state.draft = null;
     state.confirm = null;
     state.panel = null;
-    state.mode = "browse";
+    setMode("browse");
     renderPanel();
     renderWidget();
   }
@@ -1522,7 +1538,7 @@
             },
       };
       state.recordSeed = null;
-      state.mode = "browse";
+      setMode("browse");
       state.panel = "record";
       highlight(null);
       renderPanel();
@@ -1587,7 +1603,7 @@
     r.phase = "cancelling";
     state.record = null;
     state.panel = null;
-    state.mode = "browse";
+    setMode("browse");
     if (!["ready", "failed"].includes(previous))
       await send("RECORD_CANCEL").catch(() => {});
     if (state.previousDraft) {

@@ -86,6 +86,8 @@
         model = { kind: "render", revision: ++revision, html, context, ...options };
         if (frame) {
           frame.style.pointerEvents = "none";
+          // A hidden panel must release keyboard focus back to the page.
+          frame.hidden = !html;
           if (!html) frame.style.clipPath = "inset(100%)";
         }
         if (loaded) port.postMessage(model);
