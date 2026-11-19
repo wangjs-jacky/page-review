@@ -87,7 +87,7 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
         else await assert.rejects(fs.access(target), { code: "ENOENT" });
       } else {
         const result = await run();
-        assert.match(result.stdout, /版本 0\.4\.2 已验证/, result.stderr);
+        assert.match(result.stdout, new RegExp(`版本 ${RegExp.escape(VERSION)} 已验证`), result.stderr);
         assert.equal((await exec(target, ["--version"], { env })).stdout.trim(), VERSION);
         assert.equal((await fs.stat(target)).mode & 0o777, 0o755);
         if (!hosts) assert.match(result.stdout, /未检测到 Codex 或 Claude Code/);

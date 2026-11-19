@@ -1,5 +1,5 @@
 // Only these versioned public CLI files may enter the edge cache.
-export const VERSION = "0.4.2";
+export const VERSION = "0.4.3";
 export const INSTALLER_KEY = `installers/${VERSION}-r1.sh`;
 const legacyNames = ["page-review-darwin-arm64.tar.gz", "page-review-darwin-x64.tar.gz", "SHA256SUMS"],
   lightNames = ["page-review-node.tar.gz", "SHA256SUMS.node"],
@@ -79,7 +79,7 @@ export async function distributionRoute(request, env, ctx) {
     return new Response(head ? null : object.body, { headers: { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "x-page-review-delivery": "r1" } });
   }
   const parts = path.split("/"), version = parts[2], name = parts[3];
-  if (parts.length !== 4 || ![VERSION, "0.4.0"].includes(version) || !names.includes(name)) return notFound();
+  if (parts.length !== 4 || ![VERSION, "0.4.2", "0.4.0"].includes(version) || !names.includes(name)) return notFound();
   if (!env.RELEASES) return notFound();
   const key = path.slice(1), cacheKey = new Request(url.origin + path), cache = globalThis.caches?.default,
     rangeHeader = request.headers.get("range");

@@ -62,10 +62,22 @@ test("CLI PKCE回跳、私有配置、全部媒体固定引用读取、损坏附
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ payload, signature }),
           });
-        assert.equal(
-          (await fetch((await approved.json()).callbackUrl)).status,
-          200,
-        );
+        const valid = new URL((await approved.json()).callbackUrl);
+        const invalid = new URL(valid);
+        invalid.searchParams.set("state", "invalid-test-state");
+        const rejected = await fetch(invalid);
+        assert.equal(rejected.status, 400);
+        assert.match(rejected.headers.get("content-type"), /^text\/html/);
+        const rejectedPage = await rejected.text();
+        assert.match(rejectedPage, /<h1[^>]*>授权校验失败<\/h1>/);
+        assert(!rejectedPage.includes("invalid-test-state"));
+        const accepted = await fetch(valid);
+        assert.equal(accepted.status, 200);
+        assert.match(accepted.headers.get("content-security-policy"), /style-src 'nonce-/);
+        const acceptedPage = await accepted.text();
+        assert.match(acceptedPage, /<h1[^>]*>已收到授权<\/h1>/);
+        assert.match(acceptedPage, /返回发起登录的终端/);
+        assert(!acceptedPage.includes(valid.searchParams.get("code")));
       },
     });
     assert.equal(logged.access, "reader");
@@ -122,5 +134,38 @@ test("CLI PKCE回跳、私有配置、全部媒体固定引用读取、损坏附
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
     await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("CLI 只接受匹配本次请求的取消回调，既有配置保留", async () => {
+  const { login } = await import(
+    process.env.PAGE_REVIEW_TEST_BUNDLE || "../cli/page-review.mjs"
+  );
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "page-review-cancel-"));
+  const file = path.join(dir, "connection.json");
+  await fs.writeFile(file, "previous-connection");
+  try {
+    await assert.rejects(
+      login("http://127.0.0.1:1", {
+        file,
+        open: async (url) => {
+          const start = new URL(url);
+          const callback = new URL(start.searchParams.get("redirect_uri"));
+          callback.searchParams.set("error", "access_denied");
+          callback.searchParams.set("state", "other-request");
+          const mismatch = await fetch(callback);
+          assert.equal(mismatch.status, 400);
+          assert.match(await mismatch.text(), /<h1[^>]*>授权校验失败<\/h1>/);
+          callback.searchParams.set("state", start.searchParams.get("state"));
+          const denied = await fetch(callback);
+          assert.equal(denied.status, 400);
+          assert.match(await denied.text(), /<h1[^>]*>已取消授权<\/h1>/);
+        },
+      }),
+      /已取消授权/,
+    );
+    assert.equal(await fs.readFile(file, "utf8"), "previous-connection");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

@@ -45,7 +45,7 @@ D1条件修订及幂等回执防止重复/过期覆盖。先上传R2并登记，
 
 ## macOS CLI分发
 
-独立可选 `RELEASES` R2绑定仅保存公开CLI制品，不能复用私人 `FILES`。当前协议版本为0.4.2：原 `releases/0.4.2/manifest.json`、两个架构tar.gz和 `SHA256SUMS` 保持；增量发布 `releases/0.4.2/page-review-node.tar.gz`、`releases/0.4.2/SHA256SUMS.node` 与 `installers/0.4.2-r1.sh`。已发布的原包和安装器保留，回滚Worker即可恢复旧安装入口。
+独立可选 `RELEASES` R2 绑定仅保存公开 CLI 制品。CLI 0.4.3 的制品位于 `releases/0.4.3/`，安装入口使用 `installers/0.4.3-r1.sh`。旧版 0.4.0 和 0.4.2 的包继续提供下载。CLI 登录协议沿用 0.4.2，浏览器回调页采用新版设计。
 
 Worker只有在manifest、全部包及新安装器存在时才将 `cliAvailable` 设为true，并开放 `/install.sh`。脚本不缓存；白名单内的版本化公开文件单独读取并进入边缘缓存，支持HEAD、单一Range、If-Range和ETag。范围响应不入缓存，非法范围返回416；私有API和 `FILES` 完全不走此缓存。无需暴露R2桶或新增后台轮询。
 

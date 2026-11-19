@@ -6,6 +6,7 @@ import http from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { sendConnectionPage } from "./connection-page.mjs";
 import { terminalRelay } from "./terminal-intent.mjs";
 import {
   configPath,
@@ -13,7 +14,7 @@ import {
   validateConfig,
   verifyReader,
 } from "../agent-skills/page-review/scripts/connection.mjs";
-export const VERSION = "0.4.2",
+export const VERSION = "0.4.3",
   DEFAULT_API = "https://review.paws.rodeo";
 const hash = (data) => createHash("sha256").update(data).digest("hex");
 function origin(value) {
@@ -130,32 +131,28 @@ export async function login(
       if (terminalIntent && pending && (await terminalRelay(req, res, pending)))
         return;
       const u = new URL(req.url, "http://127.0.0.1");
-      res.setHeader("cache-control", "no-store");
-      res.setHeader("content-type", "text/plain; charset=utf-8");
-      res.setHeader("x-content-type-options", "nosniff");
+      const code = u.searchParams.get("code");
       if (
         req.method !== "GET" ||
         u.pathname !== "/callback" ||
-        u.searchParams.get("state") !== state ||
-        !/^[A-Za-z0-9_-]{43}$/.test(u.searchParams.get("code") || "")
+        u.searchParams.get("state") !== state
       ) {
-        res.writeHead(400);
-        res.end("授权校验失败，请回到终端重试");
+        sendConnectionPage(res, 400, "invalid");
         return;
       }
-      res.setHeader("content-type", "text/html; charset=utf-8");
-      const nonce = randomBytes(18).toString("base64url");
-      res.setHeader(
-        "content-security-policy",
-        `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'`,
-      );
-      res.end(
-        `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>终端连接 · Page Review</title><body><p>已收到授权，请回到终端。</p><script nonce="${nonce}">history.replaceState(null,"","/connected")</script></body></html>`,
-      );
-      resolveCallback(u.searchParams.get("code"));
+      if (!code && u.searchParams.get("error") === "access_denied") {
+        sendConnectionPage(res, 400, "cancelled");
+        rejectCallback(Error("已取消授权，请重新运行 page-review login"));
+        return;
+      }
+      if (!/^[A-Za-z0-9_-]{43}$/.test(code || "")) {
+        sendConnectionPage(res, 400, "invalid");
+        return;
+      }
+      sendConnectionPage(res, 200, "received");
+      resolveCallback(code);
     } catch {
-      res.writeHead(400);
-      res.end("终端连接请求无效");
+      sendConnectionPage(res, 400, "failed");
     }
   });
   const timer = setTimeout(

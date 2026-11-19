@@ -336,10 +336,15 @@ test("终端接收端只接受中央来源且必须是本终端请求，不从UR
     });
     return { status, body, handled };
   }
-  assert.equal((await call("https://attacker.invalid", requestId)).status, 403);
+  const rejected = await call("https://attacker.invalid", requestId);
+  assert.equal(rejected.status, 403);
+  assert.match(rejected.body, /<h1[^>]*>终端连接未完成<\/h1>/);
+  assert(!rejected.body.includes(proof));
   assert.equal((await call(issuer, random())).status, 400);
   assert.equal((await call(issuer, requestId, "GET")).handled, false);
   const ok = await call(issuer, requestId);
   assert.equal(ok.status, 200);
+  assert.match(ok.body, /<h1[^>]*>正在连接当前终端<\/h1>/);
+  assert.match(ok.body, /document.forms\[0\].submit\(\)/);
   assert(ok.body.includes(proof));
 });
