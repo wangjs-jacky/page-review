@@ -210,3 +210,67 @@ test("unchanged open panel keeps its DOM when refreshed or repositioned", async 
   assert.deepEqual(messages.map((message) => message.kind), ["render", "position", "render"]);
   assert.equal(messages[1].revision, messages[0].revision);
 });
+
+test("page mutations and scroll keep the same connected annotation marker", () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const markerCode = source.slice(source.indexOf("  function markRect("),
+    source.indexOf("  function panelHead("));
+  const children = [];
+  const markerRoot = {
+    children,
+    append(node) { children.push(node); },
+    replaceChildren() { children.length = 0; },
+    set innerHTML(_) { children.length = 0; },
+  };
+  let top = 90;
+  const note = { id: "03", type: "element" };
+  const state = {
+    notes: [note], showMarkers: true, mode: "browse",
+    matches: new Map([[note.id, {
+      status: "found",
+      element: { getBoundingClientRect: () => ({ top, left: 50, width: 50, height: 100 }) },
+    }]]),
+  };
+  const context = vm.createContext({
+    state, innerWidth: 800, innerHeight: 600,
+    shadow: { getElementById: () => markerRoot },
+    document: { createElement: () => ({
+      dataset: {}, style: {}, setAttribute() {},
+      remove() { children.splice(children.indexOf(this), 1); },
+    }) },
+  });
+  vm.runInContext(markerCode + "\nrenderMarkers()", context);
+  const marker = children[0];
+  top = 130;
+  vm.runInContext("renderMarkers()", context);
+  assert.equal(children[0], marker);
+  assert.equal(marker.style.top, "118px");
+  state.notes = [];
+  vm.runInContext("renderMarkers()", context);
+  assert.equal(children.length, 0);
+});
+
+test("repeated annotation clicks share the asset request and a late result cannot reopen the drawer", async () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const peek = source.slice(source.indexOf("  async function peek("),
+    source.indexOf("  function locate("));
+  const state = { panel: null, notes: [{ id: "03" }] };
+  let requests = 0;
+  let renders = 0;
+  let resolveAsset;
+  const assetResult = new Promise((resolve) => { resolveAsset = resolve; });
+  const context = vm.createContext({
+    state, renderPanel() { renders++; },
+    send() { requests++; return assetResult; },
+  });
+  const first = vm.runInContext(peek + '\npeek("03")', context);
+  assert.equal(state.panel, "peek");
+  const repeat = vm.runInContext('peek("03")', context);
+  assert.equal(requests, 1);
+  assert.equal(renders, 1);
+  state.panel = null;
+  resolveAsset({ viewport: "saved image" });
+  await Promise.all([first, repeat]);
+  assert.equal(state.panel, null);
+  assert.equal(renders, 1);
+});
