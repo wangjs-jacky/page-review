@@ -153,3 +153,27 @@ test("录制必须有视频、封面和对应关键帧；视频不能冒充图�
     400,
   );
 });
+
+test("未变快照并发复制共用同一引用，允许反复读取，修改后生成新引用", async () => {
+  const t = await setup();
+  const r = await ready(t);
+  await t.save("annotation-1");
+  const copies = await Promise.all([create(t), create(t), create(t)]);
+  assert.deepEqual(copies.map((response) => response.status).sort(), [200, 200, 201]);
+  const refs = await Promise.all(copies.map((response) => response.json()));
+  assert.deepEqual(refs, [refs[0], refs[0], refs[0]]);
+  for (let read = 0; read < 2; read++) {
+    const response = await t.request("/v1/handoffs/" + refs[0].id, { token: r.token });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).records[0].comment, t.note.comment);
+  }
+  await t.save("annotation-1", { comment: "修改后的评注" }, 1);
+  const next = await t.request("/v1/handoffs", {
+    method: "POST",
+    data: { pageUrl: t.note.pageId, localRecords: [{ id: "annotation-1", revision: 2 }] },
+  });
+  assert.equal(next.status, 201);
+  const { id } = await next.json();
+  assert.notEqual(id, refs[0].id);
+  assert.equal((await t.request("/v1/handoffs/" + refs[0].id, { token: r.token })).status, 200);
+});

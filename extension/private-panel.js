@@ -89,6 +89,20 @@
     return {
       prepare,
       render(html, context, options) {
+        if (model?.html === html && !options.focus) {
+          // Page mutations can refresh the same menu. Keep its DOM and animation.
+          const positionChanged = JSON.stringify(model.context) !== JSON.stringify(context);
+          const composerChanged = model.composer?.canSave !== options.composer?.canSave ||
+            model.composer?.feedback !== options.composer?.feedback;
+          model.context = context;
+          model.composer = options.composer;
+          if (loaded && html) {
+            if (positionChanged) port.postMessage({ kind: "position", revision, context });
+            if (composerChanged)
+              port.postMessage({ kind: "composer", revision, composer: options.composer });
+          } else if (html) prepare();
+          return;
+        }
         model = { kind: "render", revision: ++revision, html, context, ...options };
         if (frame) {
           frame.style.pointerEvents = "none";

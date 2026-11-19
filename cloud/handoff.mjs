@@ -9,6 +9,18 @@ export function pageKey(value) {
   if (!/^#(?:\/|!)/.test(u.hash)) u.hash = "";
   return u.href;
 }
+// Encode a workspace-scoped snapshot digest as a UUIDv8 for existing readers.
+async function snapshotId(workspace, page, records) {
+  const input = new TextEncoder().encode(JSON.stringify([
+    "page-review-handoff-v1", workspace, page, records,
+  ]));
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", input), 0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x80;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16),
+    hex.slice(16, 20), hex.slice(20)].join("-");
+}
 export async function handoffRoute(
   request,
   env,
@@ -247,7 +259,7 @@ export async function handoffRoute(
           "附件尚未就绪",
         );
       }
-    const id = crypto.randomUUID(),
+    const id = await snapshotId(workspace, page, records),
       createdAt = new Date().toISOString(),
       data = {
         format: "page-review-handoff",
@@ -264,13 +276,19 @@ export async function handoffRoute(
       "page_too_large",
       "本页内容过大，未生成部分交接",
     );
-    await db
+    const inserted = await db
       .prepare(
-        "INSERT INTO handoffs(workspace_id,id,page_id,body_json,created_at) VALUES(?,?,?,?,?)",
+        "INSERT INTO handoffs(workspace_id,id,page_id,body_json,created_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,id) DO NOTHING RETURNING created_at",
       )
       .bind(workspace, id, page, serialized, createdAt)
-      .run();
-    return json({ id, pageUrl: page, count: records.length, createdAt }, 201);
+      .first();
+    const stored = inserted || await db
+      .prepare("SELECT created_at FROM handoffs WHERE workspace_id=? AND id=?")
+      .bind(workspace, id)
+      .first();
+    return json({
+      id, pageUrl: page, count: records.length, createdAt: stored.created_at,
+    }, inserted ? 201 : 200);
   }
   const match = path.match(
     /^\/v1\/handoffs\/([a-zA-Z0-9-]{8,80})(?:\/assets\/([a-f0-9]{64}))?$/,
