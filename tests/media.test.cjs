@@ -31,3 +31,12 @@ test("录制控件必须完全在选区外，空间不足时要求重新选择",
     null,
   );
 });
+
+test("窄窗口的录制控制条使用可直接渲染的选区外尺寸", () => {
+  const viewport = { width: 190, height: 240 };
+  const rect = { left: 0, top: 68, width: 190, height: 172 };
+  assert.deepEqual(M.activeControls(rect, viewport), {
+    left: 8, top: 8, width: 166, height: 48,
+  });
+  assert.equal(M.activeControls(rect, { width: 150, height: 240 }), null);
+});

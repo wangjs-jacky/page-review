@@ -24,8 +24,15 @@
     const { width, height } = element.getBoundingClientRect();
     const { anchor, dock, recording } = context;
     let position;
-    if (element.classList.contains("recording-control") && recording)
-      position = PageReviewMedia.controls(recording.rect, recording.viewport, { width, height });
+    if (element.classList.contains("recording-control-active") && recording?.activeControls) {
+      position = recording.activeControls;
+      element.style.width = position.width + "px";
+      element.style.height = position.height + "px";
+    } else if (element.classList.contains("recording-control") && recording)
+      position = PageReviewMedia.controls(recording.rect, recording.viewport, { width, height }) || {
+        left: Math.max(12, Math.min(recording.rect.left, innerWidth - width - 12)),
+        top: Math.max(12, Math.min(recording.rect.top, innerHeight - height - 12)),
+      };
     else if (element.classList.contains("media-view"))
       position = { left: Math.max(12, (innerWidth - width) / 2), top: Math.max(12, (innerHeight - height) / 2) };
     else if (element.classList.contains("popover")) {
@@ -47,9 +54,10 @@
 
   function updateComposer() {
     const input = surface.getElementById("review-comment");
-    if (!input || !composer) return;
+    if (!input) return;
     input.style.height = "auto";
     input.style.height = Math.max(26, Math.min(144, input.scrollHeight)) + "px";
+    if (!composer) return;
     surface.querySelectorAll("[data-feedback]").forEach((button) => {
       const selected = button.dataset.feedback === composer.feedback;
       button.classList.toggle("selected", selected);

@@ -56,7 +56,7 @@
       connecting = true;
       try {
         const token = await send("PANEL_BIND");
-        if (listener.signal.aborted || !model?.html) return;
+        if (listener.signal.aborted) return;
         channel = token;
         frame = document.createElement("iframe");
         frame.title = "Page Review 私有评注";
@@ -72,6 +72,7 @@
           clipPath: "inset(100%)",
           pointerEvents: "none",
         });
+        frame.hidden = !model?.html;
         container.append(frame);
         timer = setTimeout(() => fail(new Error("私有评注面板无法打开，请重试")), 4500);
       } catch (error) {
@@ -81,7 +82,12 @@
       }
     }
 
+    function prepare() {
+      if (!frame && !connecting) void connect();
+    }
+
     return {
+      prepare,
       render(html, context, options) {
         model = { kind: "render", revision: ++revision, html, context, ...options };
         if (frame) {
@@ -91,7 +97,7 @@
           if (!html) frame.style.clipPath = "inset(100%)";
         }
         if (loaded) port.postMessage(model);
-        else if (html && !frame && !connecting) void connect();
+        else if (html) prepare();
       },
       position(context) {
         if (!model?.html) return;

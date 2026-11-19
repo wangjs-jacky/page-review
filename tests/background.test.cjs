@@ -292,6 +292,18 @@ test("编辑保留历史画面、原话；拒绝过期revision，定位状态写
   assert.equal(t.records.get(created.id).comment, "增加一句适用理由。");
   assert.equal(t.records.get(created.id).locationStatus, "missing");
 });
+test("没有修订号的旧评注仍可编辑并删除", async () => {
+  const t = setup();
+  const saved = (await t.call("SAVE", { note: sample, allowWithoutImage: true })).value;
+  delete t.records.get(saved.id).revision;
+
+  const edited = await t.call("SAVE", { note: { ...saved, comment: "修订旧评注" } });
+  assert.equal(edited.ok, true);
+  assert.equal(edited.value.revision, 1);
+  assert.equal(edited.value.originalComment, sample.comment);
+  assert.equal((await t.call("DELETE", { id: saved.id })).ok, true);
+  assert.equal(t.records.has(saved.id), false);
+});
 test("不能从当前页写入、重绑或删除其他站点；本页可删除", async () => {
   const t = setup();
   assert.equal(
