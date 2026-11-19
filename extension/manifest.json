@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Review · 网页评注",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "description": "标下网页上值得关注的地方，保存评注和画面，跨网页整理给 AI。",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -48,7 +48,7 @@
       "description": "启用网页评注或确认本页录制"
     }
   },
-  "version_name": "0.4.9 网页评注交互修复",
+  "version_name": "0.4.11 悬浮球启动修复",
   "web_accessible_resources": [
     {
       "resources": [

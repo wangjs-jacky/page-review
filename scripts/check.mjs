@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), extension = path.join(root, 'extension');
 const manifest = JSON.parse(await fs.readFile(path.join(extension, 'manifest.json'), 'utf8'));
 assert.equal(manifest.version, JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version, '源码与安装包版本必须一致');
+if (manifest.version_name) assert.equal(manifest.version_name.split(/\s+/)[0], manifest.version, 'Chrome 显示版本必须与扩展版本一致');
 assert.equal(manifest.manifest_version, 3); assert.equal(manifest.action.default_popup, undefined, '工具栏图标必须直接切换开关');
 assert.deepEqual(manifest.host_permissions, ['<all_urls>'], '跨网页注入和真实视口截图所需的网页权限');
 assert.equal(manifest.content_scripts, undefined, '关闭时不自动注入');

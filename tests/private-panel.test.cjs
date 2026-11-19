@@ -153,3 +153,25 @@ test("取消重选会清除录制前的评论，继续重选时则保留", async
   assert.equal(state.mode, "browse");
   assert.equal(state.recordSeed, null);
 });
+
+test("the complete content script initializes and reads the enabled setting", () => {
+  const messages = [];
+  const context = vm.createContext({
+    PageReviewCore: {},
+    location: { href: "https://example.com/" },
+    window: { addEventListener() {} },
+    chrome: {
+      runtime: {
+        onMessage: { addListener() {} },
+        async sendMessage({ type }) {
+          messages.push(type);
+          return { ok: true, value: { enabled: false } };
+        },
+      },
+      storage: { onChanged: { addListener() {} } },
+    },
+  });
+  vm.runInContext(fs.readFileSync(asset("content.js"), "utf8"), context);
+  assert.equal(typeof context.__pageReviewController.refresh, "function");
+  assert.deepEqual(messages, ["GET_SETTINGS"]);
+});
