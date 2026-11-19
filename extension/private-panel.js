@@ -29,11 +29,17 @@
       }
       if (!loaded || data?.revision !== revision) return;
       if (data.kind === "bounds") {
+        if (data.hidden === true) {
+          frame.style.clipPath = "inset(100%)";
+          frame.style.pointerEvents = "none";
+          return;
+        }
         const { left, top, right, bottom } = data;
         if (![left, top, right, bottom].every(Number.isFinite)) return;
         if (!model?.html || right <= left || bottom <= top) return;
         frame.style.clipPath = `inset(${Math.max(0, top)}px ${Math.max(0, frame.clientWidth - right)}px ${Math.max(0, frame.clientHeight - bottom)}px ${Math.max(0, left)}px)`;
-        frame.style.pointerEvents = "auto";
+        frame.style.pointerEvents = top < frame.clientHeight && bottom > 0 &&
+          left < frame.clientWidth && right > 0 ? "auto" : "none";
         return;
       }
       if (model?.html && ["action", "input", "key"].includes(data.kind))

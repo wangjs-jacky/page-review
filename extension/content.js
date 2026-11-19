@@ -965,11 +965,17 @@
     const name = dataset.action;
     if (name === "toggle" && performance.now() < suppressClick) return;
     if (state.busy) return;
+    const draft = state.draft;
+    const hasUnsavedDraft = draft && (!draft.originalNote ||
+      draft.note.comment !== draft.originalNote.comment ||
+      draft.note.feedback !== draft.originalNote.feedback);
     try {
       switch (name) {
         case "toggle":
-          state.panel = state.panel ? null : state.draft ? "editor" : state.record ? "record" : "menu";
-          renderPanel(Boolean(state.draft));
+          if (state.record) state.panel = state.panel === "record" ? null : "record";
+          else if (state.panel === "menu") state.panel = draft ? "editor" : null;
+          else state.panel = "menu";
+          renderPanel(state.panel === "editor");
           renderWidget();
           if (state.panel === "menu")
             refreshPageState().catch((e) => toast(e.message));
@@ -1001,10 +1007,14 @@
           enter("area");
           break;
         case "record":
-          if (state.draft) {
-            toast("请先保存当前评注");
+          if (hasUnsavedDraft) {
+            state.panel = "editor";
+            renderPanel(true);
+            toast("请先保存或取消当前评注，再录制");
             break;
           }
+          state.draft = null;
+          state.peek = null;
           state.recordSeed = null;
           enter("record-area");
           break;
@@ -1245,7 +1255,6 @@
         case "edit": {
           const note = state.notes.find((n) => n.id === dataset.id);
           if (!note) break;
-          const draft = state.draft;
           if (draft?.note.id === note.id) {
             if (state.panel !== "editor") {
               state.panel = "editor";
@@ -1253,9 +1262,7 @@
             }
             break;
           }
-          if (draft && (!draft.originalNote ||
-              draft.note.comment !== draft.originalNote.comment ||
-              draft.note.feedback !== draft.originalNote.feedback)) {
+          if (hasUnsavedDraft) {
             toast("请先保存或取消当前评注，再切换");
             break;
           }

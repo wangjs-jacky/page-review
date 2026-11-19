@@ -15,7 +15,7 @@
   surface.adoptedStyleSheets = [style];
   document.body.append(host);
 
-  let port, revision, context, composer, watch;
+  let port, revision, context, composer, watch, editorOffset;
   const post = (kind, data = {}) => port.postMessage({ kind, revision, ...data });
   const panel = () => surface.querySelector(".panel");
   function layout() {
@@ -37,9 +37,20 @@
       position = { left: Math.max(12, (innerWidth - width) / 2), top: Math.max(12, (innerHeight - height) / 2) };
     else if (element.classList.contains("popover")) {
       const visible = anchor && anchor.top + anchor.height > 0 && anchor.top < innerHeight;
-      position = PageReviewCore.placePopover(
-        visible ? anchor : null, { width: innerWidth, height: innerHeight }, { width, height },
-      );
+      const viewport = { width: innerWidth, height: innerHeight };
+      position = PageReviewCore.placePopover(visible ? anchor : null, viewport, { width, height });
+      if (element.classList.contains("editor")) {
+        if (editorOffset === undefined)
+          editorOffset = visible ? position.top - anchor.top : null;
+        element.classList.toggle("anchor-following", editorOffset !== null);
+        if (editorOffset !== null && !visible) {
+          element.style.visibility = "hidden";
+          post("bounds", { hidden: true });
+          return;
+        }
+        element.style.visibility = "";
+        if (editorOffset !== null) position.top = anchor.top + editorOffset;
+      }
     } else if (!element.classList.contains("drawer")) {
       position = {
         left: Math.max(12, Math.min(dock.side === "left" ? dock.x + 56 : dock.x - width - 12, innerWidth - width - 12)),
@@ -74,6 +85,7 @@
       context = data.context;
       composer = data.composer;
       watch?.disconnect();
+      editorOffset = undefined;
       surface.innerHTML = data.html;
       updateComposer();
       const element = panel();

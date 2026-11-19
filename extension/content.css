@@ -999,9 +999,11 @@ h3 {
     width: calc(100vw - 30px);
     left: 15px !important;
     right: auto !important;
+    max-height: calc(100dvh - 120px);
+  }
+  .panel.popover:not(.anchor-following) {
     top: auto !important;
     bottom: 18px;
-    max-height: calc(100dvh - 120px);
   }
   .panel.drawer {
     width: min(405px, 100%);
