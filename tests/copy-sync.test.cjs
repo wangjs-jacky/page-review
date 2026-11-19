@@ -32,6 +32,7 @@ async function client() {
         syncedLocalRevision: entry.localRevision };
     },
     markFailure: async (entry, error) => { rows.get(entry.id).error = error.message; },
+    refreshVersion: async () => 0,
     importPage: async () => {},
   };
   let failUpload = 0;
@@ -133,4 +134,19 @@ test("上传时会话失效转为登录操作，保留待传记录且不生成�
   assert.equal(t.rows.size, 1);
   assert.equal((await t.api.status()).configured, false);
   assert(!t.calls.some(c => c.path === "/v1/handoffs"));
+});
+test("快速复制保留完整云端快照，远端修订变化时刷新一次且允许原处重试", async () => {
+  const t = await client(); t.add("annotation-stale-1", {comment:"初稿"});
+  await t.api.handoff(t.server.note.pageId);
+  assert.equal(t.calls.filter(c=>c.path==='/v1/pages').length,0);
+  const changed=await t.server.save("annotation-stale-1",{comment:"另一端的新原话"},1);
+  assert.equal(changed.status,200);
+  await assert.rejects(t.api.handoff(t.server.note.pageId),e=>e.code==='page_changed');
+  assert.equal(t.calls.filter(c=>c.path==='/v1/pages').length,1);
+  // This test's importPage stub does not mutate IndexedDB; model the completed import.
+  t.notes.get('annotation-stale-1').cloud.remoteRevision=2;
+  const again=await t.api.handoff(t.server.note.pageId);
+  const read=await t.server.request('/v1/handoffs/'+again.id,{token:t.reader.token});
+  assert.equal((await read.json()).records[0].comment,'另一端的新原话');
+  assert.equal(t.calls.filter(c=>c.path==='/v1/pages').length,1);
 });

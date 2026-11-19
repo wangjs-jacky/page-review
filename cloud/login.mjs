@@ -95,9 +95,23 @@ export async function loginRoute(request, env) {
     return json({
       access: row.client_kind === "reader" ? "reader" : "writer",
       ...(row.intent_challenge
-        ? { terminalIntent: true, callback: row.callback }
+        ? { [row.client_kind === "reader" ? "terminalIntent" : "extensionIntent"]: true, callback: row.callback }
         : {}),
     });
+  }
+  if (path === "/auth/extension/start" && request.method === "POST") {
+    const body = await input(request);
+    if (!body || !/^https:\/\/[a-p]{32}\.chromiumapp\.org\/page-review$/.test(body.callback || "") ||
+        !valid(body.state) || !valid(body.challenge) || !valid(body.intentChallenge) ||
+        (body.workspaceId !== undefined && !/^w-[a-f0-9]{40}$/.test(body.workspaceId)))
+      return json({ message: "插件登录参数无效" }, 400);
+    const id = random();
+    await db.prepare("INSERT INTO login_requests(id,callback,client_state,challenge,expires_at,client_kind,intent_challenge,expected_workspace) VALUES(?,?,?,?,?,'writer',?,?)")
+      .bind(id, body.callback, body.state, body.challenge, Date.now() + 5 * 60_000,
+        body.intentChallenge, body.workspaceId || null).run();
+    const authorize = new URL("/page-review/authorize", env.LOGIN_ORIGIN);
+    authorize.searchParams.set("request_id", id);
+    return json({ requestId: id, authorizeUrl: authorize.href });
   }
   if (path === "/auth/terminal/start" && request.method === "POST") {
     const body = await input(request);

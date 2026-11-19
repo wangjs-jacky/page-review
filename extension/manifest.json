@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Review · 网页评注",
-  "version": "0.4.3",
+  "version": "0.4.6",
   "description": "标下网页上值得关注的地方，保存评注和画面，跨网页整理给 AI。",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -48,16 +48,22 @@
       "description": "启用网页评注或确认本页录制"
     }
   },
-  "version_name": "0.4.3 预发布",
+  "version_name": "0.4.6 私有评注与录制修复",
   "web_accessible_resources": [
     {
       "resources": [
-        "icons/48.png"
+        "icons/48.png",
+        "panel.html"
       ],
       "matches": [
         "http://*/*",
         "https://*/*"
       ]
     }
-  ]
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://ba-login.paws.rodeo/*"
+    ]
+  }
 }

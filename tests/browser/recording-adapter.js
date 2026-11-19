@@ -32,6 +32,10 @@
       document.documentElement.append(frame);
       await ready;
     },
+    closeDocument: async () => {
+      frame?.remove();
+      frame = null;
+    },
   };
   chrome.tabCapture = {
     getMediaStreamId: async () => {
@@ -51,8 +55,9 @@
     canvas.height = innerHeight;
     const ctx = canvas.getContext("2d"),
       start = performance.now();
+    let track;
     function draw() {
-      if (!canvas.__stopped) {
+      if (track?.readyState !== "ended") {
         ctx.fillStyle = "#edf2e9";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = "#385f52";
@@ -75,11 +80,8 @@
     }
     draw();
     const stream = canvas.captureStream(24);
-    stream
-      .getVideoTracks()[0]
-      .addEventListener("ended", () => (canvas.__stopped = true), {
-        once: true,
-      });
+    track = stream.getVideoTracks()[0];
+    globalThis.__syntheticTrack = track;
     return stream;
   };
 })();

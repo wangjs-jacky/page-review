@@ -18,12 +18,13 @@
 需要 Node.js 24+。扩展核心不依赖第三方运行库。
 
 ```sh
+npm ci
 npm run check
 npm test
 npm run build
 ```
 
-默认 API 为 `https://review.paws.rodeo`；自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.3.zip` 是扩展安装包。更新已有安装时保留原目录及扩展身份；不要先卸载丢失本机资料。
+默认 API 为 `https://review.paws.rodeo`。自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.6.zip` 是扩展安装包。更新时在原目录覆盖扩展文件并重新加载，以保留扩展身份和本机资料。
 
 CLI 安装器支持 macOS arm64/x64。已有 Node 24+ 时优先下载约 6KB 的轻量版；其余机器使用约 40MB 的自包含版，无需另装运行时。两版使用相同登录和读取协议，凭证分别保存在执行机器的私有配置中。用户安装及授权：
 

@@ -1,6 +1,10 @@
 (function (root) {
   "use strict";
   let opened;
+  // Draft IDs are strings. Array keys let sync metadata coexist in the v3
+  // database so an older extension still opens it after a rollback.
+  const syncStore = "drafts";
+  const syncKey = (...parts) => ["cloudSync", ...parts];
   const value = (request) =>
     new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
@@ -70,6 +74,22 @@
       note,
     });
     return note;
+  }
+  async function refreshVersion(workspaceId) {
+    const db = await open();
+    const state = db.transaction(syncStore, "readonly").objectStore(syncStore);
+    return (await value(state.get(syncKey("clock", workspaceId))))?.version ?? 0;
+  }
+  // Stamp the affected pages and workspace clock in the change's transaction.
+  function recordPageChanges(tx, workspaceId, ...pages) {
+    const state = tx.objectStore(syncStore);
+    const clock = syncKey("clock", workspaceId);
+    state.get(clock).onsuccess = (event) => {
+      const version = (event.target.result?.version ?? 0) + 1;
+      state.put({ id: clock, version });
+      for (const page of new Set(pages))
+        state.put({ id: syncKey("page", workspaceId, page), version });
+    };
   }
   async function list(pageId) {
     const db = await open(),
@@ -163,10 +183,16 @@
   }
   async function acknowledge(entry, remote) {
     const db = await open(),
-      tx = db.transaction(["notes", "outbox"], "readwrite"),
+      tx = db.transaction(["notes", "outbox", syncStore], "readwrite"),
       completion = done(tx);
     const notes = tx.objectStore("notes"),
       outbox = tx.objectStore("outbox");
+    recordPageChanges(tx, entry.workspaceId, entry.note.pageId);
+    // A successful server deletion permanently retires that annotation ID.
+    if (entry.kind === "delete")
+      tx.objectStore(syncStore).put({
+        id: syncKey("deleted", entry.workspaceId, entry.id),
+      });
     outbox.get(entry.id).onsuccess = (event) => {
       const current = event.target.result;
       if (current?.requestId === entry.requestId) outbox.delete(entry.id);
@@ -242,7 +268,10 @@
         createdAt: new Date().toISOString(),
       };
     const database = await open(),
-      tx = database.transaction(["notes", "assets", "outbox"], "readwrite"),
+      tx = database.transaction(
+        ["notes", "assets", "outbox", syncStore],
+        "readwrite",
+      ),
       completion = done(tx);
     const notes = tx.objectStore("notes"),
       outbox = tx.objectStore("outbox"),
@@ -263,6 +292,12 @@
       notes.put(savedCopy);
       if (image) assets.put({ ...image, id: copy.id });
       outbox.delete(id);
+      recordPageChanges(
+        tx,
+        workspaceId,
+        current.pageId,
+        remote?.note.pageId || current.pageId,
+      );
       if (remote) {
         const revision = note.revision + 1;
         notes.put({
@@ -292,7 +327,7 @@
   }
   async function restoreDeleted(entry, remote) {
     const db = await open(),
-      tx = db.transaction(["notes", "outbox"], "readwrite"),
+      tx = db.transaction(["notes", "outbox", syncStore], "readwrite"),
       completion = done(tx),
       outbox = tx.objectStore("outbox");
     let failure;
@@ -304,6 +339,12 @@
         return;
       }
       outbox.delete(entry.id);
+      recordPageChanges(
+        tx,
+        entry.workspaceId,
+        current.note.pageId,
+        remote?.note.pageId || current.note.pageId,
+      );
       if (remote)
         tx.objectStore("notes").put({
           ...remote.note,
@@ -324,26 +365,52 @@
       throw failure || e;
     }
   }
-  async function importPage(page, items, workspaceId, prune = true) {
+  async function importPage(page, items, workspaceId, version, prune = true) {
     const db = await open(),
-      tx = db.transaction(["notes", "assets"], "readwrite"),
+      tx = db.transaction(
+        ["notes", "assets", "outbox", syncStore],
+        "readwrite",
+      ),
       completion = done(tx),
       notes = tx.objectStore("notes"),
-      assets = tx.objectStore("assets");
-    notes.index("byPage").getAll(page).onsuccess = (e) => {
-      const current = e.target.result,
-        map = new Map(current.map((n) => [n.id, n]));
-      for (const remote of items) {
-        const n = map.get(remote.id);
-        if (
-          n &&
-          (!n.cloud ||
-            n.cloud.workspaceId !== workspaceId ||
-            n.cloud.status !== "synced" ||
-            n.cloud.syncedLocalRevision !== n.revision)
-        )
-          continue;
-        if (n?.cloud.remoteRevision === remote.revision) continue;
+      assets = tx.objectStore("assets"),
+      outbox = tx.objectStore("outbox"),
+      state = tx.objectStore(syncStore);
+    const merged = Promise.all([
+      value(state.get(syncKey("page", workspaceId, page))),
+      value(notes.index("byPage").getAll(page)),
+      value(outbox.getAllKeys()),
+    ]).then(async ([pageState, current, queued]) => {
+      const unchanged = (pageState?.version ?? 0) <= version,
+        map = new Map(current.map((n) => [n.id, n])),
+        pending = new Set(queued),
+        supplied = new Set(items.map((n) => n.id));
+      const isSynced = (n) =>
+        n.cloud?.workspaceId === workspaceId &&
+        n.cloud.status === "synced" &&
+        n.cloud.syncedLocalRevision === n.revision;
+      // A revision can safely advance, but presence and absence alone cannot
+      // be ordered if another read or local acknowledgement changed the page.
+      const candidates = await Promise.all(
+        items.map(async (remote) => {
+          if (pending.has(remote.id)) return;
+          // The ID is global in this database even if its remote page changed.
+          const n = map.get(remote.id) || (await value(notes.get(remote.id)));
+          if (n) {
+            if (!isSynced(n) || !(remote.revision > n.cloud.remoteRevision)) return;
+          } else if (
+            !unchanged ||
+            (await value(state.get(syncKey("deleted", workspaceId, remote.id))))
+          ) {
+            return;
+          }
+          return { remote, n };
+        }),
+      );
+      const updates = candidates.filter(Boolean);
+      const touched = new Set([page]);
+      for (const { remote, n } of updates) {
+        if (n) touched.add(n.pageId);
         const revision = (n?.revision || 0) + 1;
         notes.put({
           ...remote.note,
@@ -360,19 +427,23 @@
         });
         assets.delete(remote.id);
       }
-      for (const n of current)
-        if (
-          prune &&
-          n.cloud?.workspaceId === workspaceId &&
-          n.cloud.status === "synced" &&
-          n.cloud.syncedLocalRevision === n.revision &&
-          !items.some((r) => r.id === n.id)
-        ) {
+      if (prune && unchanged)
+        for (const n of current) {
+          if (!isSynced(n) || pending.has(n.id) || supplied.has(n.id)) continue;
           notes.delete(n.id);
           assets.delete(n.id);
         }
-    };
-    await completion;
+      if (unchanged || updates.length) recordPageChanges(tx, workspaceId, ...touched);
+    });
+    try {
+      await Promise.all([merged, completion]);
+    } catch (error) {
+      // A failed merge must never leave only part of the snapshot applied.
+      try {
+        tx.abort();
+      } catch {}
+      throw error;
+    }
   }
   async function cacheAsset(id, image) {
     const db = await open(),
@@ -382,12 +453,14 @@
     await completion;
   }
   async function draft(id) {
+    if (typeof id !== "string") return;
     const db = await open();
     return value(
       db.transaction("drafts", "readonly").objectStore("drafts").get(id),
     );
   }
   async function putDraft(record) {
+    if (typeof record?.id !== "string") throw new TypeError("录制草稿标识无效");
     const db = await open(),
       tx = db.transaction("drafts", "readwrite"),
       completion = done(tx);
@@ -395,6 +468,7 @@
     await completion;
   }
   async function deleteDraft(id) {
+    if (typeof id !== "string") return;
     const db = await open(),
       tx = db.transaction("drafts", "readwrite"),
       completion = done(tx);
@@ -403,6 +477,7 @@
   }
   root.PageReviewDB = {
     restoreDeleted,
+    refreshVersion,
     importPage,
     cacheAsset,
     draft,

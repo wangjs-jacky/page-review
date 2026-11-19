@@ -33,16 +33,18 @@
   globalThis.chrome = {
     identity: { getRedirectURL: () => "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.chromiumapp.org/page-review", launchWebAuthFlow: options => new Promise((resolve,reject) => globalThis.__loginQueue.push({ options, resolve, reject })) },
     runtime: {
-      id: 'page-review-browser-integration', getURL: name => new URL('/' + name, location.origin).href,
+      id: 'page-review-browser-integration', getURL: name => new URL('/' + name,
+        name === 'panel.html' ? globalThis.__testPanelOrigin || location.origin : location.origin).href,
       onInstalled: { addListener: listener => installed.push(listener) }, onStartup: { addListener: listener => startup.push(listener) },
       onMessage: { addListener: listener => {listeners.push(listener);if(listeners.length>1)globalThis.__adapterContentListeners.push(listener);} },
-      sendMessage: message => new Promise(resolve => listeners[0](message, { id: 'page-review-browser-integration', url: location.href, frameId: 0, tab: { id: 1, windowId: 1, url: location.href } }, resolve))
+      sendMessage: message => new Promise(resolve => listeners[0](message, { id: 'page-review-browser-integration', url: globalThis.__testInitialSenderUrl || location.href, frameId: 0, tab: { id: 1, windowId: 1, url: location.href } }, resolve))
     },
     storage: { local: storage('local'), session: storage('session'), onChanged: { addListener: listener => changes.push(listener) } },
     permissions: { contains: async () => true, onRemoved: { addListener() {} } },
     scripting: {
       getRegisteredContentScripts: async () => JSON.parse(localStorage.getItem(prefix + 'scripts') || '[]'),
       registerContentScripts: async scripts => localStorage.setItem(prefix + 'scripts', JSON.stringify(scripts)),
+      updateContentScripts: async scripts => localStorage.setItem(prefix + 'scripts', JSON.stringify(scripts)),
       unregisterContentScripts: async () => localStorage.setItem(prefix + 'scripts', '[]'),
       executeScript: async () => globalThis.__pageReviewController?.refresh()
     },

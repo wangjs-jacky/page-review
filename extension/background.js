@@ -4,19 +4,28 @@ importScripts(
   "db.js",
   "cloud-config.js",
   "cloud.js",
+  "login-tabs.js",
   "media.js",
   "recorder.js",
 );
 const Core = PageReviewCore,
   DB = PageReviewDB,
   SCRIPT_ID = "page-review-pages";
-const SCRIPT_FILES = ["core.js", "media.js", "content-style.js", "content.js"];
+const SCRIPT_FILES = [
+  "core.js", "media.js", "content-style.js", "private-panel.js", "content.js",
+];
 let actionQueue = Promise.resolve(),
-  registrationQueue = Promise.resolve();
+  registrationQueue = Promise.resolve(),
+  enabledChange = 0;
 const captures = new Map();
+const panelBindings = new Map();
+const TabLogin = typeof PageReviewTabLoginFactory === "function" && chrome.runtime.onMessageExternal
+  ? PageReviewTabLoginFactory({ chrome, loginOrigin: PageReviewCloudConfig.loginOrigin,
+      complete: (context, returned) => Cloud.finishLogin(context, returned) })
+  : null;
 const Cloud =
   typeof PageReviewCloudFactory === "function"
-    ? PageReviewCloudFactory({ db: DB, storage: chrome.storage.local })
+    ? PageReviewCloudFactory({ db: DB, storage: chrome.storage.local, tabLogin: TabLogin })
     : null;
 chrome.storage.local
   .setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })
@@ -33,46 +42,71 @@ const settings = () =>
 const librarySender = (sender) =>
   sender.id === chrome.runtime.id &&
   sender.url?.split(/[?#]/)[0] === chrome.runtime.getURL("library.html");
-function pageSender(sender) {
+function pageSenderUrl(sender) {
   if (
     sender.id !== chrome.runtime.id ||
     sender.frameId !== 0 ||
     !sender.tab?.id ||
+    (sender.documentLifecycle && sender.documentLifecycle !== "active") ||
     !/^https?:\/\//.test(sender.url || "")
   )
     throw new Error("此页面不能调用网页评注");
-  return Core.pageKey(sender.url);
+  // Chrome can retain the content script's initial URL after History API navigation.
+  const url = sender.tab.url || sender.url;
+  if (!/^https?:\/\//.test(url) || new URL(url).origin !== new URL(sender.url).origin)
+    throw new Error("此页面不能调用网页评注");
+  return url;
 }
-function reconcile() {
+function authorizePanel(channel, sender) {
+  if (sender.url?.split(/[?#]/)[0] !== chrome.runtime.getURL("panel.html") ||
+      !Number.isInteger(sender.frameId) || sender.frameId <= 0 ||
+      (sender.documentLifecycle && sender.documentLifecycle !== "active"))
+    throw Error("无法验证私有评注面板");
+  const binding = panelBindings.get(sender.tab?.id);
+  if (!binding || binding.expires <= Date.now() || binding.channel !== channel)
+    throw Error("无法验证私有评注面板");
+  panelBindings.delete(sender.tab.id);
+  return true;
+}
+function reconcile(update) {
   const next = registrationQueue
     .catch(() => {})
     .then(async () => {
+      if (update) {
+        await update.stopping;
+        await chrome.storage.local.set({ enabled: update.enabled });
+      }
       const state = await settings(),
         allowed = await chrome.permissions.contains({
           origins: PageReviewCloudConfig.pageOrigins || ["<all_urls>"],
         });
       const enabled = state.enabled && allowed;
+      if (!enabled && !update) await PageReviewRecorder.disable();
+      if (state.enabled && !allowed)
+        await chrome.storage.local.set({ enabled: false });
       const scripts = await chrome.scripting.getRegisteredContentScripts({
         ids: [SCRIPT_ID],
       });
-      if (enabled && !scripts.length)
-        await chrome.scripting.registerContentScripts([
-          {
-            id: SCRIPT_ID,
-            js: SCRIPT_FILES,
-            matches: PageReviewCloudConfig.pageOrigins || [
-              "http://*/*",
-              "https://*/*",
-            ],
-            runAt: "document_idle",
-            allFrames: false,
-            persistAcrossSessions: true,
-          },
-        ]);
+      if (enabled) {
+        const script = {
+          id: SCRIPT_ID,
+          js: SCRIPT_FILES,
+          matches: PageReviewCloudConfig.pageOrigins || ["http://*/*", "https://*/*"],
+          runAt: "document_idle",
+          allFrames: false,
+          persistAcrossSessions: true,
+        };
+        if (!scripts.length)
+          await chrome.scripting.registerContentScripts([script]);
+        else if (JSON.stringify(scripts[0].js) !== JSON.stringify(script.js) ||
+                 JSON.stringify(scripts[0].matches) !== JSON.stringify(script.matches))
+          await chrome.scripting.updateContentScripts([script]);
+      }
       if (!enabled && scripts.length)
         await chrome.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
-      if (state.enabled && !allowed)
-        await chrome.storage.local.set({ enabled: false });
+      if (enabled && update?.enabled && update.change === enabledChange)
+        PageReviewRecorder.enable();
+      if (state.enabled && !allowed) await notifySettings();
       await chrome.action.setBadgeBackgroundColor({ color: "#2864ef" });
       await chrome.action.setBadgeText({ text: enabled ? "ON" : "" });
       await chrome.action.setTitle({
@@ -97,8 +131,10 @@ async function notifySettings() {
   );
 }
 async function setEnabled(enabled) {
-  await chrome.storage.local.set({ enabled: Boolean(enabled) });
-  await reconcile();
+  const change = ++enabledChange;
+  const stopping = PageReviewRecorder.disable();
+  stopping.catch(() => {});
+  await reconcile({ enabled: Boolean(enabled), stopping, change });
   await notifySettings();
   return settings();
 }
@@ -106,16 +142,16 @@ chrome.action.onClicked.addListener((tab) => {
   actionQueue = actionQueue
     .catch(() => {})
     .then(async () => {
-      if (await PageReviewRecorder.resume(tab)) return;
       const state = await settings();
-      await setEnabled(!state.enabled);
-      if (!state.enabled && tab.id && /^https?:\/\//.test(tab.url || "")) {
+      if (state.enabled && await PageReviewRecorder.resume(tab)) return;
+      const updated = await setEnabled(!state.enabled);
+      if (updated.enabled && tab.id && /^https?:\/\//.test(tab.url || "")) {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           files: SCRIPT_FILES,
         });
       }
-      if (!state.enabled && !/^https?:\/\//.test(tab.url || ""))
+      if (updated.enabled && !/^https?:\/\//.test(tab.url || ""))
         await chrome.action.setTitle({
           title: "已启用；请在普通 HTTP/HTTPS 网页上使用",
         });
@@ -156,16 +192,17 @@ async function imageData(blob) {
     binary += String.fromCharCode(...bytes.subarray(i, i + 16384));
   return `data:${blob.type};base64,${btoa(binary)}`;
 }
-async function capture(message, sender) {
-  pageSender(sender);
+async function capture(message, tabId, pageUrl) {
+  if (!pageUrl) throw new Error("此页面不能调用网页评注");
   if (!(await settings()).enabled) throw new Error("网页评注已关闭");
-  if (message.url !== sender.url) throw new Error("页面已经变化，请重新选择");
-  const tab = await chrome.tabs.get(sender.tab.id);
+  if (message.url !== pageUrl) throw new Error("页面已经变化，请重新选择");
+  const tab = await chrome.tabs.get(tabId);
+  if (tab.url !== pageUrl) throw new Error("页面已经变化，请重新选择");
   const [active] = await chrome.tabs.query({
     active: true,
     windowId: tab.windowId,
   });
-  if (active?.id !== tab.id || tab.url !== message.url)
+  if (active?.id !== tab.id)
     throw new Error("网页不在当前前台，未截取其他标签页");
   if (Date.now() - (captures.get(tab.id) || 0) < 600)
     throw new Error("截图操作过快，请稍后点重试截图");
@@ -178,7 +215,7 @@ async function capture(message, sender) {
       active: true,
       windowId: tab.windowId,
     });
-  if (after.url !== message.url || activeAfter?.id !== tab.id)
+  if (after.url !== pageUrl || activeAfter?.id !== tab.id)
     throw new Error("截图期间页面已切换，本次画面未保存");
   const viewport = message.viewport;
   if (!viewport || viewport.width < 1 || viewport.height < 1)
@@ -251,19 +288,21 @@ async function handle(message, sender) {
     sender.id !== chrome.runtime.id
   )
     throw new Error("无效请求");
+  if (message.type === "PANEL_AUTHORIZE")
+    return authorizePanel(message.channel, sender);
   if (
     sender.url === chrome.runtime.getURL("offscreen.html") &&
     message.type === "RECORD_EVENT"
   )
     return PageReviewRecorder.event(message);
-  const ownPage = librarySender(sender) ? null : pageSender(sender);
-  if (message.type.startsWith("RECORD_")) {
-    pageSender(sender);
-    if (!(await settings()).enabled) throw Error("网页评注已关闭");
-    return PageReviewRecorder.command(message, sender);
+  const ownUrl = librarySender(sender) ? null : pageSenderUrl(sender);
+  const ownPage = ownUrl && Core.pageKey(ownUrl);
+  if (["RECORD_START", "RECORD_STOP", "RECORD_CANCEL"].includes(message.type)) {
+    if (!ownUrl) throw new Error("此页面不能调用网页评注");
+    return PageReviewRecorder.command(message, { ...sender, url: ownUrl });
   }
   if (["GET_RECORD_DRAFT", "DELETE_RECORD_DRAFT"].includes(message.type)) {
-    pageSender(sender);
+    if (!ownUrl) throw new Error("此页面不能调用网页评注");
     const draft = await DB.draft(message.id);
     if (
       !draft ||
@@ -301,7 +340,8 @@ async function handle(message, sender) {
       case "CLOUD_SETUP":
         return Cloud.setup();
       case "CLOUD_LOGIN":
-        return Cloud.login(message);
+        return Cloud.login({ ...message, sourceTab: sender.tab ||
+          (await chrome.tabs.query({ active: true, currentWindow: true }))[0] });
       case "CLOUD_STATUS":
         return Cloud.status();
       case "CLOUD_CONNECT":
@@ -349,6 +389,16 @@ async function handle(message, sender) {
   switch (message.type) {
     case "GET_SETTINGS":
       return settings();
+    case "PANEL_BIND": {
+      if (!ownUrl || !(await settings()).enabled)
+        throw Error("无法打开私有评注面板");
+      const now = Date.now();
+      for (const [id, binding] of panelBindings)
+        if (binding.expires <= now) panelBindings.delete(id);
+      const channel = crypto.randomUUID();
+      panelBindings.set(sender.tab.id, { channel, expires: now + 20000 });
+      return channel;
+    }
     case "ONLINE":
       syncCloud();
       return true;
@@ -382,7 +432,7 @@ async function handle(message, sender) {
       );
     }
     case "CAPTURE":
-      return capture(message, sender);
+      return capture(message, sender.tab?.id, ownUrl);
     case "SAVE": {
       if (!(await settings()).enabled && ownPage)
         throw new Error("网页评注已关闭，内容仍在输入框中");
@@ -550,7 +600,7 @@ async function handle(message, sender) {
       return true;
     }
     case "TAKE_FOCUS": {
-      pageSender(sender);
+      if (!ownUrl) throw new Error("此页面不能调用网页评注");
       const key = "focus:" + sender.tab.id;
       const entry = await chrome.storage.session.get(key);
       await chrome.storage.session.remove(key);
@@ -566,9 +616,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     (value) => {
       respond({ ok: true, value });
       if (["SAVE", "REBIND", "SET_OUTCOME", "DELETE"].includes(message.type))
-        syncCloud(value?.pageId || (sender.tab && /^https?:\/\//.test(sender.url || "")
-          ? Core.pageKey(sender.url)
-          : undefined));
+        syncCloud(value?.pageId || (librarySender(sender)
+          ? undefined
+          : Core.pageKey(pageSenderUrl(sender))));
     },
     (error) => respond({ ok: false, error: error.message || "操作失败", code: error.code }),
   );
