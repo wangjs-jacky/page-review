@@ -244,9 +244,11 @@
     const at = location.href;
     const notes = await send("LIST");
     if (!state.enabled || at !== location.href || request !== notesRequest) return;
+    const previousCount = state.notes.length;
     state.notes = notes.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     updateNotePositions(true);
-    renderWidget();
+    if (previousCount !== state.notes.length) renderWidget();
+    else shadow?.querySelector(".orb")?.setAttribute("aria-expanded", String(state.panel === "menu"));
     if (state.panel === "menu" || state.panel === "notes") renderPanel();
   }
   function updateNotePositions(fromStorage = false) {
@@ -567,8 +569,24 @@
   function renderMarkers() {
     if (!shadow) return;
     const markerRoot = shadow.getElementById("markers");
-    markerRoot.innerHTML = "";
-    if (state.record || !state.showMarkers || state.mode !== "browse") return;
+    if (state.record || !state.showMarkers || state.mode !== "browse") {
+      markerRoot.replaceChildren();
+      return;
+    }
+    const previous = new Map(
+      Array.from(markerRoot.children, (node) => [node.dataset.markerKey, node]),
+    );
+    function keep(key, tag, className) {
+      let node = previous.get(key);
+      if (node) previous.delete(key);
+      else {
+        node = document.createElement(tag);
+        node.className = className;
+        node.dataset.markerKey = key;
+        markerRoot.append(node);
+      }
+      return node;
+    }
     const positions = new Map();
     state.notes.forEach((note, index) => {
       const match = state.matches.get(note.id);
@@ -585,31 +603,31 @@
       const base = `${Math.round(r.left)},${Math.round(r.top)}`,
         count = positions.get(base) || 0;
       positions.set(base, count + 1);
-      const button = document.createElement("button");
-      button.className = "pin note-pin";
+      const button = keep("pin:" + note.id, "button", "pin note-pin");
       button.dataset.action = "edit";
       button.dataset.id = note.id;
-      button.textContent = String(index + 1).padStart(2, "0");
-      button.setAttribute("aria-label", `修改评注 ${index + 1}`);
+      const number = String(index + 1).padStart(2, "0");
+      if (button.textContent !== number) {
+        button.textContent = number;
+        button.setAttribute("aria-label", `修改评注 ${index + 1}`);
+      }
       Object.assign(button.style, {
         left:
           Math.max(4, Math.min(innerWidth - 29, r.left - 12 + count * 26)) +
           "px",
         top: Math.max(4, r.top - 12) + "px",
       });
-      markerRoot.append(button);
       if (note.type === "region") {
-        const box = document.createElement("div");
-        box.className = "region region-saved";
+        const box = keep("region:" + note.id, "div", "region region-saved");
         Object.assign(box.style, {
           left: r.left + "px",
           top: r.top + "px",
           width: r.width + "px",
           height: r.height + "px",
         });
-        markerRoot.append(box);
       }
     });
+    for (const node of previous.values()) node.remove();
   }
   function panelHead(title, subtitle = "") {
     return `<header class="orb-menu-head"><div><strong>${esc(title)}</strong>${subtitle ? `<span>${esc(subtitle)}</span>` : ""}</div><button class="icon-btn" data-action="minimize" aria-label="收起到右下角" title="收起到右下角">${icon("close")}</button></header>`;
@@ -909,6 +927,7 @@
     }
     const note = state.notes.find((n) => n.id === id);
     if (!note) return;
+    if (state.panel === "peek" && state.peek?.id === id) return;
     const view = { id, asset: null };
     state.peek = view;
     state.panel = "peek";
@@ -1225,6 +1244,7 @@
           break;
         case "edit": {
           if (state.draft) {
+            if (state.panel === "editor" && state.draft.note.id === dataset.id) break;
             state.panel = "editor";
             renderPanel(true);
             break;
