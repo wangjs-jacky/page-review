@@ -57,7 +57,7 @@
     remote: null,
   };
   const assets = new Map();
-  let toastTimer;
+  let toastTimer, settingsRequest = 0;
   async function send(type, payload = {}) {
     const r = await chrome.runtime.sendMessage({ type, ...payload });
     if (!r?.ok) throw Error(r?.error || "操作失败");
@@ -185,7 +185,7 @@
           await img.decode();
           if (!frame.isConnected) return;
           img.hidden = false;
-          frame.querySelector("svg").hidden = true;
+          frame.querySelector("svg").remove();
           break;
         } catch {
           // An older attachment can be unavailable. Try the next cover.
@@ -253,9 +253,20 @@
   }
   async function settings() {
     if (state.editing) throw Error("请先保存或取消修改");
-    state.cloud = await send("CLOUD_SETUP");
-    renderSettings();
+    const request = ++settingsRequest;
+    access.innerHTML = head("连接设置") +
+      '<div class="settings-body"><p class="muted" role="status">正在读取连接状态…</p></div>';
     if (!access.open) access.showModal();
+    try {
+      const cloud = await send("CLOUD_SETUP");
+      if (request !== settingsRequest || !access.open) return;
+      state.cloud = cloud;
+      renderSettings();
+    } catch (error) {
+      if (request !== settingsRequest || !access.open) return;
+      access.innerHTML = head("连接设置") +
+        `<div class="settings-body"><p class="inline-error" role="alert">${esc(error.message)}</p><button class="btn" data-action="check">重试</button></div>`;
+    }
   }
   async function copy(text) {
     try {
@@ -268,14 +279,6 @@
   async function act(b) {
     const a = b.dataset.action,
       n = state.notes.find((n) => n.id === state.selected);
-    if (a === "settings") {
-      await settings();
-      return;
-    }
-    if (a === "close-settings") {
-      access.close();
-      return;
-    }
     if (a === "refresh") {
       await reload({ remote: true });
       return;
@@ -420,7 +423,16 @@
   }
   document.addEventListener("click", async (e) => {
     const b = e.target.closest("[data-action]");
-    if (!b || state.busy) return;
+    if (!b) return;
+    if (b.dataset.action === "close-settings") {
+      access.close();
+      return;
+    }
+    if (b.dataset.action === "settings") {
+      if (!access.open) settings().catch((error) => toast(error.message));
+      return;
+    }
+    if (state.busy) return;
     state.busy = true;
     b.disabled = true;
     try {
@@ -455,6 +467,9 @@
         state[key] = e.target.value;
         await reload({ remote: true });
       });
+  access.addEventListener("close", () => {
+    if (!access.open) settingsRequest++;
+  });
   detail.addEventListener("cancel", (e) => {
     if (state.editing) {
       e.preventDefault();
