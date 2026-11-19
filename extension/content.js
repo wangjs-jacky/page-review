@@ -1243,19 +1243,28 @@
           locate(dataset.id);
           break;
         case "edit": {
-          if (state.draft) {
-            if (state.panel === "editor" && state.draft.note.id === dataset.id) break;
-            state.panel = "editor";
-            renderPanel(true);
-            break;
-          }
           const note = state.notes.find((n) => n.id === dataset.id);
           if (!note) break;
+          const draft = state.draft;
+          if (draft?.note.id === note.id) {
+            if (state.panel !== "editor") {
+              state.panel = "editor";
+              renderPanel(true);
+            }
+            break;
+          }
+          if (draft && (!draft.originalNote ||
+              draft.note.comment !== draft.originalNote.comment ||
+              draft.note.feedback !== draft.originalNote.feedback)) {
+            toast("请先保存或取消当前评注，再切换");
+            break;
+          }
           const match = state.matches.get(note.id);
           setMode("browse");
           state.peek = null;
           state.draft = {
             note: { ...note },
+            originalNote: note,
             target: match?.element || null,
             rect: match?.status === "found" ? markRect(note, match) : null,
           };
