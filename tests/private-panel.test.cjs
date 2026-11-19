@@ -285,3 +285,29 @@ test("repeated annotation clicks share the asset request and a late result canno
   assert.equal(state.panel, null);
   assert.equal(renders, 1);
 });
+
+test("open annotation switches to another marker and protects changes before switching", async () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const start = source.indexOf("  async function action(");
+  const action = source.slice(start, source.indexOf("\n  }", start) + 4);
+  const first = { id: "01", comment: "first", feedback: "" };
+  const second = { id: "07", comment: "second", feedback: "" };
+  const state = { notes: [first, second], matches: new Map() };
+  const rendered = [], notices = [];
+  const context = vm.createContext({
+    state, setMode() {}, renderPanel() { rendered.push(state.draft.note.id); },
+    toast(message) { notices.push(message); },
+  });
+  vm.runInContext(action, context);
+  const click = (id) => context.action({ action: "edit", id });
+  await click(first.id);
+  await click(second.id);
+  assert.equal(state.draft.note.comment, second.comment);
+  await click(second.id);
+  assert.deepEqual(rendered, [first.id, second.id]);
+  state.draft.note.feedback = "positive";
+  await click(first.id);
+  assert.equal(state.draft.note.id, second.id);
+  assert.equal(state.draft.note.feedback, "positive");
+  assert.equal(notices.length, 1);
+});
