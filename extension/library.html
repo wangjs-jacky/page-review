@@ -34,6 +34,7 @@
           <option value="custom">自定义时间</option></select
         ><input
           id="search"
+          autocomplete="off"
           type="search"
           aria-label="搜索网页或评注"
           placeholder="搜索网页或评注"
@@ -56,8 +57,9 @@
     </main>
     <dialog id="detail-dialog" class="drawer" aria-label="评注详情"></dialog>
     <dialog id="access-dialog" aria-label="连接设置"></dialog>
-    <dialog id="delete-dialog">
-      <h2>删除这条评注？</h2>
+    <dialog id="delete-dialog" aria-labelledby="delete-heading" aria-describedby="delete-scope">
+      <h2 id="delete-heading">删除这条评注？</h2>
+      <p id="delete-scope"></p>
       <div class="dialog-actions">
         <button class="btn" data-action="keep">保留</button
         ><button class="btn danger" data-action="confirm-delete">删除</button>
