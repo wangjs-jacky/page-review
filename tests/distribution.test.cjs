@@ -9,16 +9,16 @@ function releases() {
     ],
     objects = new Map([
       [
-        "releases/0.4.2/manifest.json",
-        JSON.stringify({ version: "0.4.2", files: names }),
+        "releases/0.4.3/manifest.json",
+        JSON.stringify({ version: "0.4.3", files: names }),
       ],
-      ["releases/0.4.2/install.sh", "public installer"],
-      ["installers/0.4.2-r1.sh", "updated installer"],
-      ["releases/0.4.2/page-review-node.tar.gz", "node release bytes"],
-      ["releases/0.4.2/SHA256SUMS.node", "node checksum"],
+      ["releases/0.4.3/install.sh", "public installer"],
+      ["installers/0.4.3-r1.sh", "updated installer"],
+      ["releases/0.4.3/page-review-node.tar.gz", "node release bytes"],
+      ["releases/0.4.3/SHA256SUMS.node", "node checksum"],
       ["install.sh", "legacy installer"],
       ["releases/0.4.0/page-review-darwin-arm64.tar.gz", "legacy binary"],
-      ...names.map((n) => ["releases/0.4.2/" + n, "test release bytes"]),
+      ...names.map((n) => ["releases/0.4.3/" + n, "test release bytes"]),
     ]);
   const calls = [];
   const metadata = key => objects.has(key) ? { size: Buffer.byteLength(objects.get(key)),
@@ -56,25 +56,25 @@ test("CLI分发缺失时不宣称已发布；完整制品才显示安装入口�
   assert.equal(await installer.text(), "updated installer");
   assert.equal(installer.headers.get('cache-control'), 'no-store');
   assert.equal(
-    (await t.request("/releases/0.4.2/private-data", { token: null })).status,
+    (await t.request("/releases/0.4.3/private-data", { token: null })).status,
     404,
   );
   assert.equal(
     (
       await t.request(
-        "/releases/0.4.2/nested/page-review-darwin-arm64.tar.gz",
+        "/releases/0.4.3/nested/page-review-darwin-arm64.tar.gz",
         { token: null },
       )
     ).status,
     404,
   );
-  t.env.RELEASES.objects.delete("installers/0.4.2-r1.sh");
+  t.env.RELEASES.objects.delete("installers/0.4.3-r1.sh");
   assert.equal(
     (await (await t.request("/v1/capabilities")).json()).cliAvailable,
     false,
   );
-  t.env.RELEASES.objects.set("installers/0.4.2-r1.sh", "updated installer");
-  t.env.RELEASES.objects.delete("releases/0.4.2/page-review-darwin-x64.tar.gz");
+  t.env.RELEASES.objects.set("installers/0.4.3-r1.sh", "updated installer");
+  t.env.RELEASES.objects.delete("releases/0.4.3/page-review-darwin-x64.tar.gz");
   c = await (await t.request("/v1/capabilities")).json();
   assert.equal(c.cliAvailable, false);
   assert.equal(c.installUrl, null);
@@ -102,7 +102,7 @@ test("新版安装脚本按版本切换，旧缓存安装器仍能下载已发�
   );
 });
 
-const publicUrl = 'https://test.invalid/releases/0.4.2/page-review-node.tar.gz';
+const publicUrl = 'https://test.invalid/releases/0.4.3/page-review-node.tar.gz';
 test('公开包冷读只访问目标；Range、HEAD、If-Range和非法范围可正确恢复下载', async () => {
   const { distributionRoute } = await import('../cloud/distribution.mjs'), env={RELEASES:releases()};
   const req = (headers={},method='GET')=>distributionRoute(new Request(publicUrl,{headers,method}),env);
@@ -114,7 +114,7 @@ test('公开包冷读只访问目标；Range、HEAD、If-Range和非法范围可
   r=await req({'range':'bytes=5-','if-range':'"stale"'});assert.equal(r.status,200);const etag=r.headers.get('etag');assert.equal(await r.text(),'node release bytes');
   r=await req({'range':'bytes=5-','if-range':etag});assert.equal(r.status,206);await r.arrayBuffer();
   r=await req({'if-none-match':etag});assert.equal(r.status,304);assert.equal(await r.text(),'');
-  env.RELEASES.calls.length=0;r=await req();assert.equal(r.status,200);await r.arrayBuffer();assert.deepEqual(env.RELEASES.calls.map(x=>x.key),['releases/0.4.2/page-review-node.tar.gz']);
+  env.RELEASES.calls.length=0;r=await req();assert.equal(r.status,200);await r.arrayBuffer();assert.deepEqual(env.RELEASES.calls.map(x=>x.key),['releases/0.4.3/page-review-node.tar.gz']);
   r=await distributionRoute(new Request(publicUrl.replace('page-review-node.tar.gz','../private')),env);assert.equal(r.status,404);
 });
 

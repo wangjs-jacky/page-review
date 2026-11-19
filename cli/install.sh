@@ -3,7 +3,7 @@ set -eu
 umask 077
 [ "$(uname -s)" = Darwin ] || { echo 'Page Review 首版仅支持 macOS' >&2; exit 1; }
 case "$(uname -m)" in arm64) arch=arm64;; x86_64) arch=x64;; *) echo '暂不支持此 Mac 架构' >&2; exit 1;; esac
-version=0.4.2
+version=0.4.3
 origin='__API_ORIGIN__'
 flavor="${PAGE_REVIEW_CLI_FLAVOR:-auto}"
 has_node=false
