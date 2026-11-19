@@ -136,3 +136,62 @@ installed_version=$("$target" --version </dev/null) || { echo '安装后版本�
 pending=false
 echo "已安装：${target}（${flavor}），版本 $version 已验证"
 case ":$PATH:" in *":$install_dir:"*) echo '接着运行：page-review login';; *) echo '将 ~/.local/bin 加入 PATH，或运行：~/.local/bin/page-review login';; esac
+
+# Paws uses the Skill directory of its selected execution host.
+codex_home="$HOME/.agents"
+claude_home=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+hosts=0
+skill_failed=false
+install_skill() {
+  hosts=$((hosts + 1))
+  skill_target="$2/skills/page-review"
+  # Existing manually installed Skills and links may have another update source.
+  if [ -L "$skill_target" ] || { [ -e "$skill_target" ] &&
+      ! grep -Fqx '<!-- Managed by the Page Review CLI installer -->' "$skill_target/SKILL.md"; }; then
+    echo "$1 Skill 已存在，保留原安装：$skill_target" >&2
+    skill_failed=true
+    return
+  fi
+  if ! (
+    mkdir -p "$2/skills" || exit 1
+    skill_stage=$(mktemp -d "$2/skills/.page-review-stage.XXXXXX") || exit 1
+    trap 'rm -rf "$skill_stage"' EXIT
+    cp -R "$work/skill" "$skill_stage/page-review" || exit 1
+    if [ -d "$skill_target" ]; then
+      # Refresh the shipped files individually, preserving local extras.
+      for file in references/connect.md scripts/connect.mjs scripts/connection.mjs scripts/read.mjs SKILL.md; do
+        parent="${file%/*}"
+        if [ "$parent" != "$file" ]; then
+          [ ! -L "$skill_target/$parent" ] || exit 1
+          mkdir -p "$skill_target/$parent" || exit 1
+        fi
+        [ ! -d "$skill_target/$file" ] || exit 1
+      done
+      for file in references/connect.md scripts/connect.mjs scripts/connection.mjs scripts/read.mjs SKILL.md; do
+        mv -fh "$skill_stage/page-review/$file" "$skill_target/$file" || exit 1
+      done
+    else
+      # macOS mv -h refuses to follow a directory symlink at the destination.
+      mv -h "$skill_stage/page-review" "$2/skills/"
+    fi
+  ); then
+    echo "$1 Skill 安装失败，可再次运行安装命令：$skill_target" >&2
+    skill_failed=true
+    return
+  fi
+  echo "$1 Skill 已安装：$skill_target"
+}
+
+mkdir -p "$work/skill/references" "$work/skill/scripts"
+# __SKILL_PAYLOAD__
+[ -s "$work/skill/SKILL.md" ] || { echo '安装脚本缺少 Skill 内容，请从原入口重新下载' >&2; exit 1; }
+if command -v codex >/dev/null 2>&1 || [ -d "${CODEX_HOME:-$HOME/.codex}" ]; then
+  install_skill Codex "$codex_home"
+fi
+if command -v claude >/dev/null 2>&1 || [ -d "$claude_home" ]; then
+  install_skill 'Claude Code' "$claude_home"
+fi
+if [ "$hosts" -eq 0 ]; then
+  echo '未检测到 Codex 或 Claude Code。CLI 已安装；安装宿主后重新运行同一命令即可添加 Skill。'
+fi
+[ "$skill_failed" = false ]

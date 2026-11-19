@@ -563,6 +563,7 @@
       }
       return {
         ...fixed,
+        reference: "page-review-" + fixed.id,
         text:
           "请读取以下网页评注及附件，按我的评注继续完成任务。先运行：\npage-review read " +
           fixed.id +

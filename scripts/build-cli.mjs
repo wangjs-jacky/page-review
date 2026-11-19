@@ -9,11 +9,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   bun =
     process.env.PAGE_REVIEW_BUN ||
     path.join(root, ".local/toolchain/bun-darwin-aarch64/bun");
-const origin =
-    process.env.PAGE_REVIEW_CLOUD_ORIGIN || "https://review.paws.rodeo",
-  u = new URL(origin);
-if (u.protocol !== "https:" || u.origin !== origin)
-  throw Error("分发需要固定HTTPS源");
 const dir = path.join(root, "dist/cli/releases", VERSION);
 await fs.mkdir(dir, { recursive: true });
 await fs.mkdir(path.join(root, ".local"), { recursive: true });
@@ -60,13 +55,6 @@ files.push("SHA256SUMS");
 await fs.writeFile(
   path.join(dir, "manifest.json"),
   JSON.stringify({ version: VERSION, files }) + "\n",
-);
-await fs.writeFile(
-  path.join(root, "dist/cli/install.sh"),
-  (await fs.readFile(path.join(root, "cli/install.sh"), "utf8")).replace(
-    "__API_ORIGIN__",
-    origin,
-  ),
 );
 await fs.copyFile(
   path.join(root, "dist/cli/install.sh"),

@@ -7,6 +7,7 @@ import https from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
+import { renderCliInstaller } from "../scripts/render-cli-installer.mjs";
 import { VERSION } from "../cli/page-review.mjs";
 const exec = promisify(execFile), root = path.resolve(import.meta.dirname, "..");
 
@@ -22,11 +23,10 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
   await exec("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key,
     "-out", cert, "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"]);
   await fs.chmod(key, 0o600);
-  const installer = await fs.readFile(path.join(root, "cli/install.sh"), "utf8");
-  let origin, scenario;
+  let origin, installer, scenario;
   const server = https.createServer({ key: await fs.readFile(key), cert: await fs.readFile(cert) }, (req, res) => {
     scenario.requests.push(req.url);
-    if (req.url === "/install.sh") return res.end(installer.replace("__API_ORIGIN__", origin));
+    if (req.url === "/install.sh") return res.end(installer);
     const name = req.url.split("/").at(-1);
     if (!req.url.startsWith(`/releases/${VERSION}/`)) { res.writeHead(404); return res.end(); }
     if (name.startsWith("SHA256SUMS")) {
@@ -39,6 +39,7 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
   });
   await new Promise(r => server.listen(0, "127.0.0.1", r));
   origin = "https://127.0.0.1:" + server.address().port;
+  installer = await renderCliInstaller(origin);
   async function fixture(body) {
     const stage = await fs.mkdtemp(path.join(dir, "fixture-"));
     await fs.writeFile(path.join(stage, "page-review"), body, { mode: 0o755 });
@@ -46,7 +47,7 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
     return fs.readFile(path.join(stage, "fixture.tar.gz"));
   }
   async function check(label, { runtime = "current", selected = "node", arch, payload, badHash = false,
-    downloadFailure = false, fail = false, installed = true, error } = {}) {
+    downloadFailure = false, hosts = false, fail = false, installed = true, error } = {}) {
     await t.test(label, async () => {
       const sandbox = await fs.mkdtemp(path.join(dir, "case with spaces-"));
       const bin = path.join(sandbox, "bin"), installDir = path.join(sandbox, "install with spaces");
@@ -63,10 +64,18 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
       }
       if (arch) await fs.writeFile(path.join(bin, "uname"),
         `#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo ${arch};; esac\n`, { mode: 0o755 });
+      const codexHome = path.join(sandbox, ".agents");
+      const codexConfig = path.join(sandbox, "codex config");
+      const claudeHome = path.join(sandbox, "claude config");
+      if (hosts) {
+        await fs.mkdir(codexConfig);
+        await fs.mkdir(claudeHome);
+      }
       scenario = { selected, payload, badHash, downloadFailure, requests: [],
         artifact: selected === "node" ? "page-review-node.tar.gz" :
           `page-review-darwin-${arch === "x86_64" ? "x64" : arch || process.arch}.tar.gz` };
       const env = { ...process.env, PATH: `${bin}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: sandbox,
+        CODEX_HOME: codexConfig, CLAUDE_CONFIG_DIR: claudeHome,
         PAGE_REVIEW_INSTALL_DIR: installDir, PAGE_REVIEW_CONFIG: config, PAGE_REVIEW_CACHE_DIR: path.join(sandbox, "cache"),
         CURL_CA_BUNDLE: cert, NO_PROXY: "127.0.0.1", no_proxy: "127.0.0.1" };
       // Verify that the absence case really has no Node on its effective PATH.
@@ -81,6 +90,23 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
         assert.match(result.stdout, /版本 0\.4\.2 已验证/, result.stderr);
         assert.equal((await exec(target, ["--version"], { env })).stdout.trim(), VERSION);
         assert.equal((await fs.stat(target)).mode & 0o777, 0o755);
+        if (!hosts) assert.match(result.stdout, /未检测到 Codex 或 Claude Code/);
+        else {
+          for (const host of [codexHome, claudeHome]) {
+            const skill = path.join(host, "skills", "page-review");
+            await fs.writeFile(path.join(skill, "local.txt"), "preserve");
+            const source = await fs.readFile(path.join(root, "agent-skills/page-review/SKILL.md"));
+            assert.deepEqual(await fs.readFile(path.join(skill, "SKILL.md")), source);
+            await fs.appendFile(path.join(skill, "SKILL.md"), "\nold managed contents\n");
+          }
+          await run();
+          for (const host of [codexHome, claudeHome]) {
+            const skill = path.join(host, "skills", "page-review");
+            for (const file of ["SKILL.md", "references/connect.md", "scripts/connect.mjs", "scripts/connection.mjs", "scripts/read.mjs"])
+              assert.deepEqual(await fs.readFile(path.join(skill, file)), await fs.readFile(path.join(root, "agent-skills/page-review", file)));
+            assert.equal(await fs.readFile(path.join(skill, "local.txt"), "utf8"), "preserve");
+          }
+        }
       }
       assert.equal(await fs.readFile(config, "utf8"), "preserve-connection");
       assert.deepEqual((await fs.readdir(installDir)).filter(n => n.startsWith(".page-review")), []);
@@ -89,7 +115,8 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
     });
   }
   try {
-    await check("已有Node 24：同一curl命令只下载真实轻量包");
+    await check("检测到两个配置目录时同步安装，重装更新并保留本地附加文件", { hosts: true });
+  await check("已有Node 24：同一curl命令只下载真实轻量包");
     if (process.env.PAGE_REVIEW_TEST_NODE22)
       await check("已有Node 22：同一curl命令只下载真实轻量包", { runtime: process.env.PAGE_REVIEW_TEST_NODE22 });
     await check("没有Node：真实本机架构自包含包可运行", { runtime: "missing", selected: "standalone" });
