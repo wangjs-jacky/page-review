@@ -108,31 +108,90 @@
             .includes(state.query.toLowerCase())),
     );
   }
+  function pageGroups(rows) {
+    const domains = new Map();
+    for (const note of rows) {
+      const url = new URL(note.pageId || PageReviewCore.pageKey(note.url));
+      const domain = url.hostname;
+      if (!domains.has(domain)) domains.set(domain, new Map());
+      const pages = domains.get(domain);
+      if (!pages.has(url.href)) {
+        pages.set(url.href, { url, title: note.title || url.hostname, notes: [] });
+      }
+      pages.get(url.href).notes.push(note);
+    }
+    return domains;
+  }
+  function thumbnail(notes, kind) {
+    const ids = notes.filter((note) => note.hasImage).map((note) => note.id);
+    return `<span class="history-cover" data-kind="${kind}" data-images="${esc(JSON.stringify(ids))}">${icon("note")}<img alt="" hidden></span>`;
+  }
   function render() {
     const rows = visible();
-    document.getElementById("count").textContent = rows.length + " 条评注";
-    app.innerHTML = rows.length
-      ? rows
-          .map(
-            (n) =>
-              `<button class="history-row" data-action="detail" data-id="${n.id}">${n.hasImage ? `<img data-image="${n.id}" alt="${n.hasVideo ? "录制封面" : "截图"}">` : `<span class="no-media">${icon("note")}</span>`}<span class="history-content"><strong>${esc(n.title || new URL(n.url).hostname)}${n.hasVideo ? `<b class="video-flag">▶ ${clock(n.recording?.duration)}</b>` : ""}</strong><span class="row-comment">${feedback(n)}${esc(n.comment)}</span></span><time>${time(n.createdAt)}</time></button>`,
-          )
-          .join("")
-      : '<div class="empty-state">没有匹配的评注</div>';
-    images(app);
+    const domains = pageGroups(rows);
+    const selectedPage = history.state?.annotationPage;
+    const page = selectedPage &&
+      pageGroups(state.notes.filter((note) =>
+        (note.pageId || PageReviewCore.pageKey(note.url)) === selectedPage,
+      )).get(new URL(selectedPage).hostname)?.get(selectedPage);
+    const matchingPage = page && domains.get(page.url.hostname)?.get(selectedPage);
+    document.getElementById("count").textContent =
+      (page ? matchingPage?.notes.length || 0 : rows.length) + " 条评注";
+    if (page) {
+      app.innerHTML = `<div class="history-page-heading">
+        <button class="text-button history-back" data-action="back-page">‹ 返回网页</button>
+        <span>${esc(page.url.hostname)}</span>
+        <h1>${esc(page.title)}</h1>
+      </div>${matchingPage ? `<div class="history-grid">${matchingPage.notes.map((note) =>
+        `<button class="history-card note-card" data-action="detail" data-id="${esc(note.id)}">${thumbnail([note], "note")}
+          <span class="card-copy"><span class="note-caption">${feedback(note)}${esc(note.comment) || "评注"}</span>
+          <span class="card-meta"><time>${time(note.createdAt)}</time>${note.hasVideo ? `<b class="video-flag">▶ ${clock(note.recording?.duration)}</b>` : ""}</span></span>
+        </button>`).join("")}</div>` : '<div class="empty-state">没有匹配的评注</div>'}`;
+    } else {
+      if (selectedPage) history.replaceState(null, "");
+      app.innerHTML = domains.size ? [...domains].map(([domain, pages]) =>
+        `<section class="history-domain"><header><h2>${esc(domain)}</h2><span>${pages.size} 个网页</span></header>
+          <div class="history-grid">${[...pages].map(([key, item]) =>
+            `<button class="history-card page-card" data-action="view-page" data-page="${esc(key)}">${thumbnail(item.notes, "page")}
+              <span class="card-copy"><span class="card-title"><strong>${esc(item.title)}</strong><span class="card-count">${item.notes.length} 条评注</span></span>
+              <span class="card-meta card-path">${esc(item.url.pathname + item.url.search + item.url.hash)}</span></span>
+            </button>`).join("")}</div>
+        </section>`).join("") : '<div class="empty-state">没有匹配的评注</div>';
+    }
+    thumbnails(app);
   }
   async function image(id) {
-    if (!assets.has(id)) assets.set(id, await send("GET_ASSET", { id }));
+    if (!assets.has(id)) {
+      const pending = send("GET_ASSET", { id }).catch((error) => {
+        if (assets.get(id) === pending) assets.delete(id);
+        throw error;
+      });
+      assets.set(id, pending);
+    }
     return assets.get(id);
   }
-  async function images(container) {
-    for (const el of container.querySelectorAll("[data-image]"))
-      try {
-        const a = await image(el.dataset.image);
-        if (el.isConnected && a?.viewport) el.src = a.viewport;
-      } catch {
-        el.alt = "附件暂不可用";
+  async function thumbnails(container) {
+    for (const frame of container.querySelectorAll("[data-images]")) {
+      for (const id of JSON.parse(frame.dataset.images)) {
+        if (!frame.isConnected) return;
+        try {
+          const asset = await image(id);
+          const src = frame.dataset.kind === "note"
+            ? asset?.crop || asset?.viewport
+            : asset?.viewport;
+          if (!src) continue;
+          const img = frame.querySelector("img");
+          img.src = src;
+          await img.decode();
+          if (!frame.isConnected) return;
+          img.hidden = false;
+          frame.querySelector("svg").hidden = true;
+          break;
+        } catch {
+          // An older attachment can be unavailable. Try the next cover.
+        }
       }
+    }
   }
   async function reload({ remote = false } = {}) {
     error.hidden = true;
@@ -157,7 +216,7 @@
       detail.close();
       return;
     }
-    let a = assets.get(n.id);
+    let a;
     detail.innerHTML =
       head("评注详情") +
       `<div class="detail-body"><div class="detail-source"><button class="text-button" data-action="open">${esc(new URL(n.url).hostname)}</button><time>${time(n.createdAt)}</time></div>${state.editing ? `<textarea id="edit-comment" aria-label="修改评注" maxlength="12000">${esc(n.comment)}</textarea><div class="detail-actions">${["positive", "negative"].map((v) => `<button class="icon-btn" data-action="feedback" data-value="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${state.editingFeedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}<button class="btn" data-action="cancel-edit">取消</button><button class="btn primary" data-action="save-edit">保存</button></div>` : `${feedback(n)}<p class="detail-comment">${esc(n.comment)}</p><div class="detail-actions"><button class="text-button" data-action="edit">修改</button><button class="text-button" data-action="delete">删除</button>${n.cloud?.status === "conflict" ? '<button class="text-button" data-action="conflict">处理同步冲突</button>' : ""}</div>`}${n.hasImage ? '<div id="detail-media" class="detail-media"></div>' : ""}${state.remote ? `<div class="conflict"><p>云端：${esc(state.remote.note.comment)}</p><button class="btn" data-action="fork">将本机意见另存</button></div>` : ""}</div><footer class="detail-footer"><button class="btn" data-action="open">返回网页</button><button class="btn" data-action="copy-page-full">复制完整指令</button><button class="btn primary" data-action="copy-page">复制本页评注</button></footer>`;
@@ -219,6 +278,16 @@
     }
     if (a === "refresh") {
       await reload({ remote: true });
+      return;
+    }
+    if (a === "view-page") {
+      history.pushState({ annotationPage: b.dataset.page }, "");
+      render();
+      window.scrollTo(0, 0);
+      return;
+    }
+    if (a === "back-page") {
+      history.back();
       return;
     }
     if (a === "detail") {
@@ -299,7 +368,7 @@
     }
     if (a === "seek") {
       const video = detail.querySelector("video");
-      video.currentTime = assets.get(n.id).frames[Number(b.dataset.index)].at;
+      video.currentTime = (await image(n.id)).frames[Number(b.dataset.index)].at;
       return video.play();
     }
     if (a === "copy-page" || a === "copy-page-full") {
@@ -367,6 +436,7 @@
       if (b.isConnected) b.disabled = false;
     }
   });
+  window.addEventListener("popstate", render);
   document.getElementById("search").addEventListener("input", (e) => {
     state.query = e.target.value;
     render();
