@@ -65,7 +65,6 @@
     suppressClick = 0,
     operation = 0,
     route = location.href;
-    state.recordSeed = null;
   const state = {
     cloud: null,
     copying: false,
@@ -73,6 +72,7 @@
     copyFormat: "reference",
     copyResumePanel: null,
     record: null,
+    recordSeed: null,
     mediaBack: null,
     confirm: null,
     pageError: "",
