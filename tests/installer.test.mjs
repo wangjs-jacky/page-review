@@ -54,7 +54,8 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
       const target = path.join(installDir, "page-review"), config = path.join(sandbox, "connection.json");
       if (installed) await fs.writeFile(target, "previous-cli", { mode: 0o755 });
       await fs.writeFile(config, "preserve-connection", { mode: 0o600 });
-      if (runtime === "current") await fs.symlink(process.execPath, path.join(bin, "node"));
+      if (runtime === "current" || runtime.startsWith("/"))
+        await fs.symlink(runtime === "current" ? process.execPath : runtime, path.join(bin, "node"));
       if (runtime === "old" || runtime === "broken") {
         await fs.writeFile(path.join(bin, "node"), runtime === "old" ?
           '#!/bin/sh\n# Simulate a running Node 23 whose version probe rejects compatibility.\nexit 1\n' :
@@ -89,6 +90,8 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
   }
   try {
     await check("已有Node 24：同一curl命令只下载真实轻量包");
+    if (process.env.PAGE_REVIEW_TEST_NODE22)
+      await check("已有Node 22：同一curl命令只下载真实轻量包", { runtime: process.env.PAGE_REVIEW_TEST_NODE22 });
     await check("没有Node：真实本机架构自包含包可运行", { runtime: "missing", selected: "standalone" });
     await check("旧Node：回退自包含包", { runtime: "old", selected: "standalone" });
     await check("Node无法启动：回退自包含包", { runtime: "broken", selected: "standalone" });
@@ -98,6 +101,15 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
     await check("下载失败保留旧CLI", { downloadFailure: true, fail: true, error: /404/ });
     await check("错误版本即使零退出也拒绝覆盖", { runtime: "missing", selected: "standalone", payload: await fixture("#!/bin/sh\necho 0.0.0\n"), fail: true, error: /CLI版本校验失败|CLI版本命令未正常退出/ });
     await check("版本命令非零退出拒绝覆盖", { runtime: "missing", selected: "standalone", payload: await fixture(`#!/bin/sh\necho ${VERSION}\nexit 1\n`), fail: true, error: /CLI版本校验失败|CLI版本命令未正常退出/ });
+    const basenameSensitive = await fixture(`#!/bin/sh\n[ "\${0##*/}" = page-review ] || exit 7\necho ${VERSION}\n`);
+    await check("保留 CLI 文件名执行安装目录预检", {
+      runtime: "missing", selected: "standalone", payload: basenameSensitive,
+    });
+    const stageFailure = await fixture(`#!/bin/sh\ncase "$0" in */.page-review-stage.*/*) exit 7;; esac\necho ${VERSION}\n`);
+    await check("安装目录执行失败报告退出码并保留旧CLI", {
+      runtime: "missing", selected: "standalone", payload: stageFailure, fail: true,
+      error: /安装目录内的 CLI 版本命令执行失败（退出码 7）/,
+    });
     const postFailure = await fixture(`#!/bin/sh\ncase "$0" in *"/install with spaces/page-review") echo wrong;; *) echo ${VERSION};; esac\n`);
     await check("最终安装路径版本验证失败恢复旧CLI", { runtime: "missing", selected: "standalone", payload: postFailure, fail: true, error: /安装后版本校验失败/ });
     await check("首次安装后验证失败移除新CLI", { runtime: "missing", selected: "standalone", payload: postFailure, installed: false, fail: true, error: /安装后版本校验失败/ });

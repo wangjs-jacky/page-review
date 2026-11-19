@@ -199,8 +199,8 @@ export function createPageReviewBridge({
           const encoded = Buffer.from(JSON.stringify(data)).toString("base64url");
           const fields = { request_id: requestId, csrf: expected,
             relay: encoded + "." + signature("terminal-relay\0" + encoded) };
-          return res.send(layout("正在登录网页评注",
-            '<div class="eyebrow">PAGE REVIEW</div><h1>正在返回网页…</h1><p id="page-review-status" role="status">身份已验证，正在接续同步。</p>',
+          return res.send(layout("Page Review",
+            '<p id="page-review-status" role="alert"></p>',
             `(async()=>{try{const extensionId=${JSON.stringify(extensionId)},requestId=${JSON.stringify(requestId)};
             if(!globalThis.chrome?.runtime?.sendMessage)throw Error();
             const proof=await chrome.runtime.sendMessage(extensionId,{type:"PAGE_REVIEW_LOGIN_PROOF",requestId});
@@ -208,7 +208,7 @@ export function createPageReviewBridge({
             const r=await fetch("/page-review/authorize",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({...${JSON.stringify(fields)},proof:proof.proof}).toString()});
             if(!r.ok)throw Error();const value=await r.json();
             const done=await chrome.runtime.sendMessage(extensionId,{type:"PAGE_REVIEW_LOGIN_COMPLETE",requestId,callbackUrl:value.callbackUrl});
-            if(!done?.ok)throw Error();document.querySelector("#page-review-status").textContent="已登录，可以返回原网页。";
+            if(!done?.ok)throw Error();window.close();
             }catch{document.querySelector("#page-review-status").textContent="登录未完成，请返回插件重试；本机评注仍保留。";}})();`));
         }
         return res.send(

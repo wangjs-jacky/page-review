@@ -68,3 +68,47 @@ test("panel accepts a render channel only after background verification and a ma
   click({ ...event, isTrusted: true });
   assert.equal(replies[1]?.kind, "action");
 });
+
+test("copy prerequisites open connection settings and preserve the original panel", async () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const copyPage = source.slice(source.indexOf("  async function copyPage("),
+    source.indexOf("  async function discardDraft("));
+  for (const code of ["login_required", "cli_not_connected"]) {
+    const state = { panel: "menu" };
+    const context = vm.createContext({
+      state, renderPanel() {},
+      send: async (type) => {
+        if (type === "CLOUD_SETUP") return { configured: true, cliConnections: [] };
+        throw Object.assign(new Error(code), { code });
+      },
+    });
+    await vm.runInContext(copyPage + "\ncopyPage()", context);
+    assert.equal(state.panel, "settings");
+    assert.equal(state.copyResumePanel, "menu");
+    assert.equal(state.copyIssue, null);
+    assert.equal(state.cloud.configured, code === "cli_not_connected");
+  }
+});
+
+test("signing in from connection settings resumes the pending clipboard action", async () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const action = source.slice(source.indexOf("  async function action("),
+    source.indexOf("\n  }", source.indexOf("  async function action(")) + 4);
+  const copy = source.slice(source.indexOf("  async function resumeCopy("),
+    source.indexOf("  async function discardDraft("));
+  const state = { panel: "settings", copyResumePanel: "notes" };
+  const calls = [];
+  const context = vm.createContext({
+    state, renderPanel() {}, loadNotes() {}, toast() {},
+    clipboard: async text => calls.push(text),
+    send: async (type, payload) => {
+      calls.push(type);
+      if (type === "CLOUD_LOGIN") assert.equal(payload.resume, "copy");
+      if (type === "CREATE_HANDOFF") return { text: "example reference", count: 1 };
+    },
+  });
+  await vm.runInContext(action + copy + '\naction({ action: "login" })', context);
+  assert.deepEqual(calls, ["CLOUD_LOGIN", "CREATE_HANDOFF", "example reference"]);
+  assert.equal(state.panel, "notes");
+  assert.equal(state.copyResumePanel, null);
+});

@@ -963,7 +963,11 @@
           renderPanel();
           break;
         case "login":
-          await send("CLOUD_LOGIN");
+          await send("CLOUD_LOGIN", state.copyResumePanel ? { resume: "copy" } : {});
+          if (state.copyResumePanel) {
+            await resumeCopy();
+            break;
+          }
           state.cloud = await send("CLOUD_SETUP");
           state.panel = "settings";
           renderPanel();
@@ -971,9 +975,7 @@
         case "check-connection":
           state.cloud = await send("CLOUD_SETUP");
           if (state.cloud.cliConnections?.length && state.copyResumePanel) {
-            state.panel = state.copyResumePanel;
-            state.copyResumePanel = null;
-            await copyPage();
+            await resumeCopy();
             break;
           }
           renderPanel();
@@ -985,12 +987,6 @@
           break;
         case "login-copy":
           await copyPage({ login: true });
-          break;
-        case "connect-terminal":
-          state.copyResumePanel = state.panel;
-          state.cloud = await send("CLOUD_SETUP");
-          state.panel = "settings";
-          renderPanel();
           break;
         case "copy-install":
           await clipboard(
@@ -1448,6 +1444,11 @@
     }
     await loadNotes();
   }
+  async function resumeCopy() {
+    if (state.copyResumePanel) state.panel = state.copyResumePanel;
+    state.copyResumePanel = null;
+    await copyPage();
+  }
   async function copyPage({ login = false } = {}) {
     if (state.copying) return;
     if (state.draft || state.record) {
@@ -1455,6 +1456,7 @@
       return;
     }
     state.copying = true;
+    state.copyResumePanel = null;
     state.copyIssue = null;
     state.pageError = "";
     renderPanel();
@@ -1470,10 +1472,15 @@
         state.panel = "copy-fallback";
       }
     } catch (e) {
+      if (e.code === "login_required" || e.code === "cli_not_connected") {
+        state.copyResumePanel = state.panel || "menu";
+        state.panel = "settings";
+        state.cloud = e.code === "login_required" ? { configured: false } :
+          await send("CLOUD_SETUP");
+        return;
+      }
       const actions = {
-        login_required: { message: "尚未登录", action: "login-copy", label: "登录并复制" },
         account_mismatch: { message: "账号不一致", action: "login-copy", label: "登录原账号" },
-        cli_not_connected: { message: "终端尚未连接", action: "connect-terminal", label: "连接终端" },
         revision_conflict: { message: "评注有更新", action: "library", label: "查看冲突" },
       };
       state.copyIssue = actions[e.code] || (login ? {
@@ -1697,7 +1704,7 @@
     if (message?.type === "PAGE_REVIEW_LOGIN_RESULT") {
       if (message.ok && message.resume === "copy") {
         state.copying = false;
-        copyPage().catch((e) => toast(e.message));
+        resumeCopy().catch((e) => toast(e.message));
       } else if (!message.ok) toast(message.error);
     }
   });

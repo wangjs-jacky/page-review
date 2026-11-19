@@ -7,24 +7,28 @@ version=0.4.2
 origin='__API_ORIGIN__'
 flavor="${PAGE_REVIEW_CLI_FLAVOR:-auto}"
 has_node=false
-if command -v node >/dev/null 2>&1 && node --use-env-proxy -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' </dev/null 2>/dev/null; then has_node=true; fi
+if command -v node >/dev/null 2>&1 && node --use-env-proxy -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' </dev/null 2>/dev/null; then has_node=true; fi
 case "$flavor" in
   auto) if [ "$has_node" = true ]; then flavor=node; else flavor=standalone; fi;;
-  node) [ "$has_node" = true ] || { echo '轻量版需要已有Node 24+；可用PAGE_REVIEW_CLI_FLAVOR=standalone选择独立版' >&2; exit 1; };;
+  node) [ "$has_node" = true ] || { echo '轻量版需要支持 --use-env-proxy 的 Node 22 或更高版本；可用PAGE_REVIEW_CLI_FLAVOR=standalone选择独立版' >&2; exit 1; };;
   standalone) :;;
   *) echo 'PAGE_REVIEW_CLI_FLAVOR只接受auto、node或standalone' >&2; exit 1;;
 esac
 if [ "$flavor" = node ]; then
   artifact=page-review-node.tar.gz
   sums=SHA256SUMS.node
-  echo '[1/4] 使用已有Node 24+，下载轻量CLI（不重复安装运行时）' >&2
+  echo '[1/4] 使用已有Node，下载轻量CLI（不重复安装运行时）' >&2
 else
   artifact="page-review-darwin-$arch.tar.gz"
   sums=SHA256SUMS
+  if [ "${PAGE_REVIEW_CLI_FLAVOR:-auto}" = auto ] && command -v node >/dev/null 2>&1; then
+    echo '[1/4] 当前 PATH 中的 Node 未通过轻量版兼容性检测（需 Node 22+ 且支持 --use-env-proxy）' >&2
+  fi
   echo '[1/4] 使用独立CLI（约40MB，无需Node/Bun）；将显示下载进度' >&2
 fi
 work=$(mktemp -d)
 staging=''
+staging_dir=''
 backup=''
 pending=false
 had_previous=false
@@ -45,6 +49,7 @@ cleanup() {
   rm -rf "$work"
   [ -z "$backup" ] || rm -rf "$backup"
   if [ -n "$staging" ]; then rm -f "$staging"; fi
+  if [ -n "$staging_dir" ]; then rmdir "$staging_dir"; fi
   exit "$result"
 }
 trap cleanup EXIT
@@ -105,12 +110,20 @@ install_dir="${PAGE_REVIEW_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$install_dir"
 target="$install_dir/page-review"
 [ ! -d "$target" ] || { echo '安装目标是目录，未安装' >&2; exit 1; }
-staging=$(mktemp "$install_dir/.page-review-XXXXXX")
+staging_dir=$(mktemp -d "$install_dir/.page-review-stage.XXXXXX")
+staging="$staging_dir/page-review"
 cp "$work/page-review" "$staging"
 chmod 755 "$staging"
 echo '[4/4] 安装到原目录；保留原连接配置' >&2
-candidate_version=$("$staging" --version </dev/null) || { echo 'CLI版本校验失败，原CLI未改动' >&2; exit 1; }
-[ "$candidate_version" = "$version" ] || { echo 'CLI版本校验失败，原CLI未改动' >&2; exit 1; }
+candidate_version=$("$staging" --version </dev/null) || {
+  code=$?
+  printf '安装目录内的 CLI 版本命令执行失败（退出码 %s），原CLI未改动\n' "$code" >&2
+  exit 1
+}
+[ "$candidate_version" = "$version" ] || {
+  printf '安装目录内的 CLI 未返回预期版本 %s，原CLI未改动\n' "$version" >&2
+  exit 1
+}
 backup=$(mktemp -d "$install_dir/.page-review-backup.XXXXXX")
 if [ -e "$target" ] || [ -L "$target" ]; then
   cp -Pp "$target" "$backup/previous"
