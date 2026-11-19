@@ -1,6 +1,6 @@
 {
   "name": "page-review",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "private": true,
   "description": "在正常浏览中评注网页，保存画面与关注点，整理给 AI 阅读。",
   "scripts": {
