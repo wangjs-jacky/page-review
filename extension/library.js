@@ -57,7 +57,7 @@
     remote: null,
   };
   const assets = new Map();
-  let toastTimer, settingsRequest = 0;
+  let toastTimer, settingsRequest = 0, reloadRequest = 0;
   async function send(type, payload = {}) {
     const r = await chrome.runtime.sendMessage({ type, ...payload });
     if (!r?.ok) throw Error(r?.error || "操作失败");
@@ -197,18 +197,24 @@
     }
   }
   async function reload({ remote = false } = {}) {
+    const request = ++reloadRequest;
     error.hidden = true;
     if (remote)
       try {
         await send("CLOUD_LIBRARY", { filters: range() });
       } catch (e) {
-        error.textContent = e.message;
-        error.hidden = false;
+        if (request === reloadRequest) {
+          error.textContent = e.message;
+          error.hidden = false;
+        }
       }
-    [state.notes, state.cloud] = await Promise.all([
+    const [notes, cloud] = await Promise.all([
       send("LIST"),
       send("CLOUD_STATUS"),
     ]);
+    if (request !== reloadRequest) return;
+    state.notes = notes;
+    state.cloud = cloud;
     render();
   }
   const head = (title) =>
@@ -368,6 +374,8 @@
     if (a === "confirm-delete") {
       const ids = state.deleting;
       const failed = [];
+      const progress = document.getElementById("delete-progress");
+      progress.textContent = `正在删除 ${ids.length} 条评注…`;
       for (const id of ids) {
         try {
           await send("DELETE", { id });
@@ -476,21 +484,80 @@
     state.query = e.target.value;
     render();
   });
-  document
-    .getElementById("history-date")
-    .addEventListener("change", async (e) => {
-      state.date = e.target.value;
-      document.getElementById("custom-date").hidden = state.date !== "custom";
-      await reload({ remote: true });
+  const dateTrigger = document.getElementById("history-date");
+  const dateMenu = document.getElementById("date-menu");
+  const dateOptions = [...dateMenu.querySelectorAll("[data-range]")];
+
+  function closeDateMenu({ restoreFocus = false } = {}) {
+    dateMenu.hidden = true;
+    dateTrigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus) dateTrigger.focus();
+  }
+
+  function openDateMenu(option = dateOptions.find((item) => item.dataset.range === state.date)) {
+    dateMenu.hidden = false;
+    dateTrigger.setAttribute("aria-expanded", "true");
+    option.focus();
+  }
+
+  function refreshDateFilter() {
+    render();
+    reload({ remote: true }).catch((error) => toast(error.message));
+  }
+
+  dateTrigger.addEventListener("click", () => {
+    if (dateMenu.hidden) openDateMenu();
+    else closeDateMenu();
+  });
+  dateTrigger.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault();
+    openDateMenu(event.key === "ArrowDown" ? dateOptions[0] : dateOptions.at(-1));
+  });
+  dateMenu.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDateMenu({ restoreFocus: true });
+      return;
+    }
+    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = dateOptions.indexOf(document.activeElement);
+    const offset = event.key === "ArrowUp" ? -1 : 1;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? dateOptions.length - 1
+      : (index + offset + dateOptions.length) % dateOptions.length;
+    dateOptions[next].focus();
+  });
+  dateMenu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-range]");
+    if (!option) return;
+    state.date = option.dataset.range;
+    dateTrigger.firstElementChild.textContent = option.textContent;
+    for (const item of dateOptions) item.setAttribute("aria-checked", String(item === option));
+    document.getElementById("custom-date").hidden = state.date !== "custom";
+    closeDateMenu({ restoreFocus: true });
+    refreshDateFilter();
+  });
+  const dateFilter = dateTrigger.parentElement;
+  document.addEventListener("pointerdown", (event) => {
+    if (!dateMenu.hidden && !dateFilter.contains(event.target)) closeDateMenu();
+  });
+  dateFilter.addEventListener("focusout", (event) => {
+    if (!dateMenu.hidden && !dateFilter.contains(event.relatedTarget)) closeDateMenu();
+  });
+  for (const key of ["from", "to"]) {
+    document.getElementById("date-" + key).addEventListener("change", (event) => {
+      state[key] = event.target.value;
+      refreshDateFilter();
     });
-  for (const key of ["from", "to"])
-    document
-      .getElementById("date-" + key)
-      .addEventListener("change", async (e) => {
-        state[key] = e.target.value;
-        await reload({ remote: true });
-      });
-  deletion.addEventListener("close", () => { state.deleting = null; });
+  }
+  deletion.addEventListener("cancel", (event) => {
+    if (state.busy) event.preventDefault();
+  });
+  deletion.addEventListener("close", () => {
+    state.deleting = null;
+    document.getElementById("delete-progress").textContent = "";
+  });
   access.addEventListener("close", () => {
     if (!access.open) settingsRequest++;
   });

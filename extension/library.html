@@ -27,12 +27,18 @@
     </header>
     <main class="library-shell">
       <div class="history-filters">
-        <select id="history-date" aria-label="记录时间">
-          <option value="all">全部时间</option>
-          <option value="today">今天</option>
-          <option value="week">最近 7 天</option>
-          <option value="custom">自定义时间</option></select
-        ><input
+        <div class="date-filter">
+          <button id="history-date" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="date-menu">
+            <span>全部时间</span><span class="date-chevron" aria-hidden="true"></span>
+          </button>
+          <div id="date-menu" role="menu" aria-label="记录时间" hidden>
+            <button type="button" role="menuitemradio" aria-checked="true" tabindex="-1" data-range="all">全部时间</button>
+            <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-range="today">今天</button>
+            <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-range="week">最近 7 天</button>
+            <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-range="custom">自定义时间…</button>
+          </div>
+        </div>
+        <input
           id="search"
           autocomplete="off"
           type="search"
@@ -60,6 +66,7 @@
     <dialog id="delete-dialog" aria-labelledby="delete-heading" aria-describedby="delete-scope">
       <h2 id="delete-heading">删除这条评注？</h2>
       <p id="delete-scope"></p>
+      <p id="delete-progress" role="status"></p>
       <div class="dialog-actions">
         <button class="btn" data-action="keep">保留</button
         ><button class="btn danger" data-action="confirm-delete">删除</button>
