@@ -152,10 +152,13 @@
       app.innerHTML = domains.size ? [...domains].map(([domain, pages]) =>
         `<section class="history-domain"><header><h2>${esc(domain)}</h2><span>${pages.size} 个网页</span></header>
           <div class="history-grid">${[...pages].map(([key, item]) =>
-            `<button class="history-card page-card" data-action="view-page" data-page="${esc(key)}">${thumbnail(item.notes, "page")}
+            `<article class="history-card page-card"><button class="page-card-open" data-action="view-page" data-page="${esc(key)}">${thumbnail(item.notes, "page")}
               <span class="card-copy"><span class="card-title"><strong>${esc(item.title)}</strong><span class="card-count">${item.notes.length} 条评注</span></span>
               <span class="card-meta card-path">${esc(item.url.pathname + item.url.search + item.url.hash)}</span></span>
-            </button>`).join("")}</div>
+            </button><div class="page-card-actions">
+              <button class="btn" data-action="copy-page" data-page="${esc(key)}" aria-label="复制 ${esc(item.title)} 的全部评注">复制评注</button>
+              <button class="text-button card-delete" data-action="delete-page" data-page="${esc(key)}" aria-label="删除 ${esc(item.title)} 的全部评注">删除本页评注</button>
+            </div></article>`).join("")}</div>
         </section>`).join("") : '<div class="empty-state">没有匹配的评注</div>';
     }
     thumbnails(app);
@@ -343,8 +346,18 @@
       toast("已保存");
       return;
     }
-    if (a === "delete") {
-      state.deleting = n.id;
+    if (a === "delete" || a === "delete-page") {
+      const pageUrl = b.dataset.page;
+      const page = pageUrl && pageGroups(state.notes)
+        .get(new URL(pageUrl).hostname)?.get(pageUrl);
+      const notes = pageUrl ? page?.notes : n && [n];
+      if (!notes?.length) throw Error("找不到要删除的评注");
+      state.deleting = notes.map((note) => note.id);
+      document.getElementById("delete-heading").textContent = page
+        ? "删除此网页的全部评注？" : "删除这条评注？";
+      document.getElementById("delete-scope").textContent = page
+        ? `${page.title} · ${page.url.pathname}${page.url.search}${page.url.hash}，共 ${notes.length} 条评注（含当前筛选条件之外的评注）。`
+        : "";
       deletion.showModal();
       return;
     }
@@ -353,12 +366,22 @@
       return;
     }
     if (a === "confirm-delete") {
-      await send("DELETE", { id: state.deleting });
-      assets.delete(state.deleting);
+      const ids = state.deleting;
+      const failed = [];
+      for (const id of ids) {
+        try {
+          await send("DELETE", { id });
+          assets.delete(id);
+        } catch {
+          failed.push(id);
+        }
+      }
       deletion.close();
-      detail.close();
+      if (detail.open && !failed.includes(state.selected)) detail.close();
       await reload();
-      toast("已删除");
+      toast(failed.length
+        ? `已删除 ${ids.length - failed.length} 条，${failed.length} 条未删除，可重试`
+        : `已删除 ${ids.length} 条评注`);
       return;
     }
     if (a === "enlarge") {
@@ -375,7 +398,7 @@
       return video.play();
     }
     if (a === "copy-page" || a === "copy-page-full") {
-      const fixed = await send("CREATE_HANDOFF", { pageUrl: n.url });
+      const fixed = await send("CREATE_HANDOFF", { pageUrl: b.dataset.page || n.url });
       await copy(a === "copy-page-full" ? fixed.text : fixed.reference);
       return;
     }
@@ -467,6 +490,7 @@
         state[key] = e.target.value;
         await reload({ remote: true });
       });
+  deletion.addEventListener("close", () => { state.deleting = null; });
   access.addEventListener("close", () => {
     if (!access.open) settingsRequest++;
   });

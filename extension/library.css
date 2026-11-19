@@ -549,3 +549,41 @@ button[aria-pressed="true"] {
 }
 
 .workspace-header strong{display:flex;align-items:center;gap:10px}.brand-icon{display:block;flex:none;border-radius:7px}
+
+#search:focus-visible {
+  outline: none;
+  border-color: #6489bd;
+  box-shadow: inset 0 0 0 1px #6489bd;
+}
+.page-card-open {
+  display: block;
+  width: 100%;
+  flex: 1;
+  text-align: left;
+  padding: 0;
+}
+.page-card-open:focus-visible {
+  outline-offset: -3px;
+}
+.page-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+.page-card-actions :focus-visible {
+  outline-offset: 0;
+}
+.card-delete:hover {
+  color: #a43131;
+}
+#delete-scope {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+#delete-scope:empty {
+  display: none;
+}
