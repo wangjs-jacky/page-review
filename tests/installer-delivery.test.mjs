@@ -7,6 +7,7 @@ import https from 'node:https';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
+import {renderCliInstaller} from '../scripts/render-cli-installer.mjs';
 const exec=promisify(execFile), root=path.resolve(import.meta.dirname,'..');
 
 test('真实HTTPS轻量安装：中断保留旧版、再次运行206续传、完整缓存复用及损坏校验保护',async t=>{
@@ -17,7 +18,7 @@ test('真实HTTPS轻量安装：中断保留旧版、再次运行206续传、完
   const requests=[];let sha=createHash('sha256').update(archive).digest('hex'),base,cut=true,bad=false,stall=false;
   const server=https.createServer({key:await fs.readFile(key),cert:await fs.readFile(cert)},async(req,res)=>{
     requests.push({url:req.url,range:req.headers.range});
-    if(req.url==='/install.sh'){res.end((await fs.readFile(path.join(root,'cli/install.sh'),'utf8')).replace('__API_ORIGIN__',base));return}
+    if(req.url==='/install.sh'){res.end(await renderCliInstaller(base));return}
     if(req.url==='/releases/0.4.2/SHA256SUMS.node'){res.end((bad?'0'.repeat(64):sha)+'  page-review-node.tar.gz\n');return}
     if(req.url==='/releases/0.4.2/page-review-node.tar.gz'){
       const offset=req.headers.range?Number(/^bytes=(\d+)-$/.exec(req.headers.range)?.[1]):0;
@@ -30,7 +31,7 @@ test('真实HTTPS轻量安装：中断保留旧版、再次运行206续传、完
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));base='https://127.0.0.1:'+server.address().port;
   const installDir=path.join(dir,'bin'),config=path.join(dir,'connection.json');await fs.mkdir(installDir);await fs.writeFile(path.join(installDir,'page-review'),'previous-cli');await fs.writeFile(config,'preserve-connection');
-  const env={...process.env,NO_PROXY:'127.0.0.1',no_proxy:'127.0.0.1',PAGE_REVIEW_INSTALL_DIR:installDir,PAGE_REVIEW_CACHE_DIR:path.join(dir,'cache'),PAGE_REVIEW_CONFIG:config,CURL_CA_BUNDLE:cert};
+  const env={...process.env,HOME:dir,CODEX_HOME:path.join(dir,'codex'),CLAUDE_CONFIG_DIR:path.join(dir,'claude'),NO_PROXY:'127.0.0.1',no_proxy:'127.0.0.1',PAGE_REVIEW_INSTALL_DIR:installDir,PAGE_REVIEW_CACHE_DIR:path.join(dir,'cache'),PAGE_REVIEW_CONFIG:config,CURL_CA_BUNDLE:cert};
   const run=extra=>exec('/bin/sh',['-c',`curl -fsSL '${base}/install.sh' | sh`],{env:{...env,...extra},maxBuffer:1e6});
   try{
     await assert.rejects(run(),e=>/下载未完成/.test(e.stderr));assert.equal(await fs.readFile(path.join(installDir,'page-review'),'utf8'),'previous-cli');

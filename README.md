@@ -43,6 +43,10 @@ node --test tests/installer.test.mjs tests/installer-delivery.test.mjs
 
 制品在 `dist/cli/`；轻量构建单独生成 `SHA256SUMS.node` 和 `installers/0.4.2-r1.sh`，保留原独立包与校验清单。安装显示阶段和进度，有连接、低速和总时限；中断后再次运行同一命令可续传，不自动重试。SHA-256、版本值及命令退出码通过后才原子替换 CLI；最终安装路径再次核对版本，失败恢复旧 CLI，首次安装失败则移除新文件。设置 `PAGE_REVIEW_CLI_FLAVOR=standalone` 可强制使用独立版。轻量版需要 PATH 中支持 `--use-env-proxy` 的 Node 22 或更新版本（22.x 从 22.21.0 开始），否则自动选独立版；安装时规范启动行，使该CLI进程沿用现有HTTP(S)_PROXY与NO_PROXY，不修改系统代理。代码构建不等于已完成公证、签名、公开分发或所有架构的真机验证。
 
+默认「复制本页评注」写入 `page-review-<UUID>`，可在新会话发送「结合 page-review-<UUID>」。没有安装 Skill 的宿主可用「复制完整指令」。两种入口均以复制时的同步快照为准。
+
+安装脚本包含 CLI 所需的原版本包下载和完整读取 Skill。它检测 PATH 中的命令或现有宿主配置目录，将 Skill 安装到 Codex 的 `~/.agents/skills/page-review` 与 Claude Code 的 `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/page-review`。Paws 由所选执行机器的 Codex 或 Claude Code 加载。尚无受支持宿主时仅安装 CLI，之后可用同一命令补装。重装更新由安装器维护的文件，保留用户添加的文件和独立维护的同名入口。
+
 ## 验证与部署边界
 
 [云服务与交接协议](cloud/README.md)说明独立授权、迁移、分发绑定与部署步骤。[Agent Skill](agent-skills/page-review/SKILL.md)同时保留已有检索读取方式。

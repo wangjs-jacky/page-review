@@ -69,6 +69,7 @@
     cloud: null,
     copying: false,
     copyIssue: null,
+    copyFormat: "reference",
     copyResumePanel: null,
     record: null,
     mediaBack: null,
@@ -630,7 +631,7 @@
   }
   function copyMarkup() {
     const issue = state.copyIssue;
-    return `<div class="copy-region"><button class="btn primary copy-main" data-action="copy" ${state.copying ? "disabled" : ""}>${icon("copy")}${state.copying ? "正在准备…" : "复制本页评注"}</button>${issue ? `<p class="inline-error" role="alert">${esc(issue.message)}<button class="text-button" data-action="${issue.action}" ${state.copying ? "disabled" : ""}>${issue.label}</button></p>` : ""}</div>`;
+    return `<div class="copy-region"><button class="btn primary copy-main" data-action="copy" ${state.copying ? "disabled" : ""}>${icon("copy")}${state.copying ? "正在准备…" : "复制本页评注"}</button><button class="text-button" data-action="copy-full" ${state.copying ? "disabled" : ""}>复制完整指令</button>${issue ? `<p class="inline-error" role="alert">${esc(issue.message)}<button class="text-button" data-action="${issue.action}" ${state.copying ? "disabled" : ""}>${issue.label}</button></p>` : ""}</div>`;
   }
   function renderPanel(focus = false) {
     if (!shadow) return;
@@ -986,7 +987,7 @@
           );
           break;
         case "login-copy":
-          await copyPage({ login: true });
+          await copyPage({ login: true, format: state.copyFormat });
           break;
         case "copy-install":
           await clipboard(
@@ -997,6 +998,12 @@
         case "copy-login":
           await clipboard("page-review connect --api " + state.cloud.apiUrl + " --workspace " + state.cloud.workspaceId);
           toast("已复制登录命令");
+          break;
+        case "copy-retry":
+          await copyPage({ format: state.copyFormat });
+          break;
+        case "copy-full":
+          await copyPage({ format: "full" });
           break;
         case "copy":
           await copyPage();
@@ -1447,15 +1454,16 @@
   async function resumeCopy() {
     if (state.copyResumePanel) state.panel = state.copyResumePanel;
     state.copyResumePanel = null;
-    await copyPage();
+    await copyPage({ format: state.copyFormat });
   }
-  async function copyPage({ login = false } = {}) {
+  async function copyPage({ login = false, format = "reference" } = {}) {
     if (state.copying) return;
     if (state.draft || state.record) {
       toast("请先保存当前评注");
       return;
     }
     state.copying = true;
+    state.copyFormat = format;
     state.copyResumePanel = null;
     state.copyIssue = null;
     state.pageError = "";
@@ -1464,10 +1472,10 @@
       if (login) await send("CLOUD_LOGIN", { resume: "copy" });
       const fixed = await send("CREATE_HANDOFF");
       await loadNotes();
-      state.copyText = fixed.text;
+      state.copyText = format === "full" ? fixed.text : fixed.reference;
       try {
-        await clipboard(fixed.text);
-        toast("已复制 " + fixed.count + " 条评注，粘贴到终端使用");
+        await clipboard(state.copyText);
+        toast(format === "full" ? "已复制完整指令" : "已复制评注引用，可粘贴到 AI 对话");
       } catch {
         state.panel = "copy-fallback";
       }
@@ -1486,7 +1494,7 @@
       state.copyIssue = actions[e.code] || (login ? {
         message: "登录未完成", action: "login-copy", label: "重试",
       } : {
-        message: "复制失败", action: "copy", label: "重试",
+        message: "复制失败", action: "copy-retry", label: "重试",
       });
     } finally {
       state.copying = false;

@@ -96,7 +96,7 @@ test("signing in from connection settings resumes the pending clipboard action",
     source.indexOf("\n  }", source.indexOf("  async function action(")) + 4);
   const copy = source.slice(source.indexOf("  async function resumeCopy("),
     source.indexOf("  async function discardDraft("));
-  const state = { panel: "settings", copyResumePanel: "notes" };
+  const state = { panel: "settings", copyResumePanel: "notes", copyFormat: "full" };
   const calls = [];
   const context = vm.createContext({
     state, renderPanel() {}, loadNotes() {}, toast() {},
@@ -104,11 +104,11 @@ test("signing in from connection settings resumes the pending clipboard action",
     send: async (type, payload) => {
       calls.push(type);
       if (type === "CLOUD_LOGIN") assert.equal(payload.resume, "copy");
-      if (type === "CREATE_HANDOFF") return { text: "example reference", count: 1 };
+      if (type === "CREATE_HANDOFF") return { text: "example full instruction", reference: "example reference", count: 1 };
     },
   });
   await vm.runInContext(action + copy + '\naction({ action: "login" })', context);
-  assert.deepEqual(calls, ["CLOUD_LOGIN", "CREATE_HANDOFF", "example reference"]);
+  assert.deepEqual(calls, ["CLOUD_LOGIN", "CREATE_HANDOFF", "example full instruction"]);
   assert.equal(state.panel, "notes");
   assert.equal(state.copyResumePanel, null);
 });

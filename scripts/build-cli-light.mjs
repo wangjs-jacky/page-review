@@ -1,3 +1,4 @@
+import { renderCliInstaller } from "./render-cli-installer.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -23,9 +24,7 @@ export async function buildLightCli() {
     const sum = createHash("sha256").update(bytes).digest("hex") + "  " + name;
     await fs.writeFile(path.join(dir, "SHA256SUMS.node"), sum + "\n");
     const origin = process.env.PAGE_REVIEW_CLOUD_ORIGIN || "https://review.paws.rodeo";
-    if (new URL(origin).protocol !== "https:" || new URL(origin).origin !== origin)
-      throw Error("分发需要固定HTTPS源");
-    const installer = (await fs.readFile(path.join(root, "cli/install.sh"), "utf8")).replace("__API_ORIGIN__", origin);
+    const installer = await renderCliInstaller(origin);
     await fs.mkdir(path.join(root, "dist/cli/installers"), { recursive: true });
     await fs.writeFile(path.join(root, "dist/cli/installers", VERSION + "-r1.sh"), installer);
     await fs.writeFile(path.join(root, "dist/cli/install.sh"), installer);

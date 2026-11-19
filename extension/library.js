@@ -160,7 +160,7 @@
     let a = assets.get(n.id);
     detail.innerHTML =
       head("评注详情") +
-      `<div class="detail-body"><div class="detail-source"><button class="text-button" data-action="open">${esc(new URL(n.url).hostname)}</button><time>${time(n.createdAt)}</time></div>${state.editing ? `<textarea id="edit-comment" aria-label="修改评注" maxlength="12000">${esc(n.comment)}</textarea><div class="detail-actions">${["positive", "negative"].map((v) => `<button class="icon-btn" data-action="feedback" data-value="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${state.editingFeedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}<button class="btn" data-action="cancel-edit">取消</button><button class="btn primary" data-action="save-edit">保存</button></div>` : `${feedback(n)}<p class="detail-comment">${esc(n.comment)}</p><div class="detail-actions"><button class="text-button" data-action="edit">修改</button><button class="text-button" data-action="delete">删除</button>${n.cloud?.status === "conflict" ? '<button class="text-button" data-action="conflict">处理同步冲突</button>' : ""}</div>`}${n.hasImage ? '<div id="detail-media" class="detail-media"></div>' : ""}${state.remote ? `<div class="conflict"><p>云端：${esc(state.remote.note.comment)}</p><button class="btn" data-action="fork">将本机意见另存</button></div>` : ""}</div><footer class="detail-footer"><button class="btn" data-action="open">返回网页</button><button class="btn primary" data-action="copy-page">复制本页评注</button></footer>`;
+      `<div class="detail-body"><div class="detail-source"><button class="text-button" data-action="open">${esc(new URL(n.url).hostname)}</button><time>${time(n.createdAt)}</time></div>${state.editing ? `<textarea id="edit-comment" aria-label="修改评注" maxlength="12000">${esc(n.comment)}</textarea><div class="detail-actions">${["positive", "negative"].map((v) => `<button class="icon-btn" data-action="feedback" data-value="${v}" aria-label="${v === "positive" ? "点赞" : "点踩"}" aria-pressed="${state.editingFeedback === v}">${icon(v === "positive" ? "like" : "dislike")}</button>`).join("")}<button class="btn" data-action="cancel-edit">取消</button><button class="btn primary" data-action="save-edit">保存</button></div>` : `${feedback(n)}<p class="detail-comment">${esc(n.comment)}</p><div class="detail-actions"><button class="text-button" data-action="edit">修改</button><button class="text-button" data-action="delete">删除</button>${n.cloud?.status === "conflict" ? '<button class="text-button" data-action="conflict">处理同步冲突</button>' : ""}</div>`}${n.hasImage ? '<div id="detail-media" class="detail-media"></div>' : ""}${state.remote ? `<div class="conflict"><p>云端：${esc(state.remote.note.comment)}</p><button class="btn" data-action="fork">将本机意见另存</button></div>` : ""}</div><footer class="detail-footer"><button class="btn" data-action="open">返回网页</button><button class="btn" data-action="copy-page-full">复制完整指令</button><button class="btn primary" data-action="copy-page">复制本页评注</button></footer>`;
     if (!detail.open) detail.showModal();
     if (n.hasImage) {
       try {
@@ -302,9 +302,9 @@
       video.currentTime = assets.get(n.id).frames[Number(b.dataset.index)].at;
       return video.play();
     }
-    if (a === "copy-page") {
+    if (a === "copy-page" || a === "copy-page-full") {
       const fixed = await send("CREATE_HANDOFF", { pageUrl: n.url });
-      await copy(fixed.text);
+      await copy(a === "copy-page-full" ? fixed.text : fixed.reference);
       return;
     }
     if (a === "conflict") {
