@@ -2,7 +2,7 @@
 
 在原网页点选、框选或评论整页，附上截图或区域视频。保存后点击“复制本页评注”，粘贴给终端 Agent；它通过独立只读 CLI 获取本页全部已保存评注和附件，无需先打开资料库。
 
-当前扩展为 **0.4.3 预发布版**：工具栏保留 F5 品牌图标，页内悬浮入口恢复蓝色画笔，关闭按钮与数量角标分开显示。配套云 API、CLI 和中央认证桥沿用已发布的兼容 0.4.2，终端连接继续复用浏览器会话及有效 reader。0.4.2 的协议升级前提见 [终端连接协议](integrations/better-auth/terminal-connect.md)。
+当前扩展为 **0.4.7 预发布版**。点击框选或录制后，拖动区域时显示十字光标，确认或按 Esc 取消后恢复网页原有光标。云 API 和 CLI 继续使用兼容的 0.4.2 协议。终端连接见 [终端连接协议](integrations/better-auth/terminal-connect.md)。
 
 ## 使用流程
 
@@ -24,7 +24,7 @@ npm test
 npm run build
 ```
 
-默认 API 为 `https://review.paws.rodeo`。自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.6.zip` 是扩展安装包。更新时在原目录覆盖扩展文件并重新加载，以保留扩展身份和本机资料。
+默认 API 为 `https://review.paws.rodeo`。自部署构建通过 `PAGE_REVIEW_CLOUD_ORIGIN` 指定固定 HTTPS 源。凭证不进入构建目录。`dist/page-review/` 是未打包扩展目录，`dist/page-review-0.4.7.zip` 是扩展安装包。更新时在原目录覆盖扩展文件并重新加载，以保留扩展身份和本机资料。
 
 CLI 安装器支持 macOS arm64/x64。已有 Node 24+ 时优先下载约 6KB 的轻量版；其余机器使用约 40MB 的自包含版，无需另装运行时。两版使用相同登录和读取协议，凭证分别保存在执行机器的私有配置中。用户安装及授权：
 
