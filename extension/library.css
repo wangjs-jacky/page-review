@@ -104,6 +104,14 @@ p {
   padding: 10px 13px;
   height: 42px;
 }
+.history-filters select {
+  appearance: none;
+  padding-right: 37px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23647895' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 12px center;
+  background-size: 16px;
+  background-repeat: no-repeat;
+}
 .history-filters input[type="search"] {
   flex: 1;
   min-width: 180px;
@@ -181,9 +189,18 @@ p {
 }
 .history-card:hover {
   border-color: #9bb5da;
-  box-shadow: 0 4px 14px #263e6510;
+  box-shadow: 0 7px 20px #263e6524;
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .history-card {
+    transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  }
+  .history-card:hover {
+    transform: translateY(-3px);
+  }
 }
 .history-cover {
+  position: relative;
   display: grid;
   place-items: center;
   width: 100%;
@@ -193,6 +210,8 @@ p {
   overflow: hidden;
 }
 .history-cover img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -202,8 +221,8 @@ p {
   object-fit: cover;
   object-position: center top;
 }
-.history-cover [hidden] {
-  display: none;
+.history-cover > [hidden] {
+  display: none !important;
 }
 .card-copy {
   display: grid;
