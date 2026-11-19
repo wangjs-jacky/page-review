@@ -71,8 +71,8 @@
           zIndex: "80",
           clipPath: "inset(100%)",
           pointerEvents: "none",
+          visibility: model?.html ? "visible" : "hidden",
         });
-        frame.hidden = !model?.html;
         container.append(frame);
         timer = setTimeout(() => fail(new Error("私有评注面板无法打开，请重试")), 4500);
       } catch (error) {
@@ -106,8 +106,8 @@
         model = { kind: "render", revision: ++revision, html, context, ...options };
         if (frame) {
           frame.style.pointerEvents = "none";
-          // A hidden panel must release keyboard focus back to the page.
-          frame.hidden = !html;
+          // Keep a viewport for the iframe so its first editor layout can report bounds.
+          frame.style.visibility = html ? "visible" : "hidden";
           if (!html) frame.style.clipPath = "inset(100%)";
         }
         if (loaded) port.postMessage(model);

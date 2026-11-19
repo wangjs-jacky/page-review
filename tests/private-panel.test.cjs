@@ -200,8 +200,12 @@ test("unchanged open panel keeps its DOM when refreshed or repositioned", async 
   });
   const html = "<section>评注 0</section>";
   const layout = { dock: { x: 100, y: 100 } };
-  panel.render(html, layout, { focus: false });
+  panel.prepare();
   await new Promise(setImmediate);
+  assert.equal(frame.hidden, undefined, "the collapsed iframe retains its viewport");
+  assert.equal(frame.style.visibility, "hidden");
+  panel.render(html, layout, { focus: false });
+  assert.equal(frame.style.visibility, "visible");
   onMessage({ isTrusted: true, source: frame.contentWindow, origin: "https://extension.invalid", data: { type: "PAGE_REVIEW_PANEL_READY" } });
   sendPort.onmessage({ data: { kind: "ready" } });
   panel.render(html, { dock: { x: 100, y: 100 } }, { focus: false });
@@ -209,6 +213,13 @@ test("unchanged open panel keeps its DOM when refreshed or repositioned", async 
   panel.render("<section>评注 1</section>", layout, { focus: false });
   assert.deepEqual(messages.map((message) => message.kind), ["render", "position", "render"]);
   assert.equal(messages[1].revision, messages[0].revision);
+  panel.render("", layout, {});
+  assert.equal(frame.hidden, undefined);
+  assert.equal(frame.style.visibility, "hidden");
+  assert.equal(frame.style.pointerEvents, "none");
+  assert.equal(frame.style.clipPath, "inset(100%)");
+  panel.render(html, layout, { focus: true });
+  assert.equal(frame.style.visibility, "visible");
 });
 
 test("page mutations and scroll keep the same connected annotation marker", () => {
