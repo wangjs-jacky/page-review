@@ -311,3 +311,76 @@ test("open annotation switches to another marker and protects changes before swi
   assert.equal(state.draft.note.feedback, "positive");
   assert.equal(notices.length, 1);
 });
+
+test("anchored editor keeps its scroll offset and hides outside the viewport", () => {
+  const source = fs.readFileSync(asset("private-panel-frame.js"), "utf8");
+  const start = source.indexOf("  function layout()");
+  const layout = source.slice(start, source.indexOf("  function updateComposer()", start));
+  const anchor = { left: 240, top: 430, width: 240, height: 70 };
+  const style = {};
+  const element = {
+    style,
+    classList: { contains: name => ["editor", "popover"].includes(name), toggle() {} },
+    getBoundingClientRect: () => {
+      const top = parseFloat(style.top) || 0;
+      return { width: 350, height: 200, left: 250, right: 600, top, bottom: top + 200 };
+    },
+  };
+  const messages = [];
+  const context = vm.createContext({
+    panel: () => element, surface: { querySelector: () => null },
+    context: { anchor }, innerWidth: 1200, innerHeight: 650, editorOffset: undefined,
+    PageReviewCore: require("../extension/core.js"),
+    post: (_kind, data) => messages.push(data),
+  });
+  vm.runInContext(layout + "\nlayout()", context);
+  const initial = parseFloat(style.top);
+  assert(initial >= 15);
+  anchor.top -= 260;
+  vm.runInContext("layout()", context);
+  assert.equal(parseFloat(style.top), initial - 260);
+  anchor.top = -100;
+  vm.runInContext("layout()", context);
+  assert.equal(messages.at(-1).hidden, true);
+  assert.equal(style.visibility, "hidden");
+  anchor.top = 430;
+  vm.runInContext("layout()", context);
+  assert.equal(parseFloat(style.top), initial);
+  assert.equal(style.visibility, "");
+});
+
+test("the orb opens its menu over an annotation and recording protects only unsaved edits", async () => {
+  const source = fs.readFileSync(asset("content.js"), "utf8");
+  const start = source.indexOf("  async function action(");
+  const action = source.slice(start, source.indexOf("\n  }", start) + 4);
+  const panels = [], modes = [], notices = [];
+  const originalNote = { id: "03", comment: "saved", feedback: "positive" };
+  const draft = { note: { ...originalNote }, originalNote };
+  const state = { panel: "editor", draft };
+  const context = vm.createContext({
+    state, renderPanel() { panels.push(state.panel); }, renderWidget() {},
+    refreshPageState: async () => {}, enter(mode) { modes.push(mode); },
+    toast(message) { notices.push(message); }, suppressClick: 0, performance,
+  });
+  vm.runInContext(action, context);
+  const click = (action) => context.action({ action });
+  await click("toggle");
+  assert.equal(state.panel, "menu");
+  await click("toggle");
+  assert.equal(state.panel, "editor");
+  await click("toggle");
+  draft.note.comment = "unsaved";
+  await click("record");
+  assert.equal(state.panel, "editor");
+  assert.equal(state.draft.note.comment, "unsaved");
+  assert.equal(notices.length, 1);
+  assert.equal(modes.length, 0);
+  draft.note.comment = originalNote.comment;
+  await click("toggle");
+  await click("record");
+  assert.equal(state.draft, null);
+  assert.deepEqual(modes, ["record-area"]);
+  state.panel = "peek";
+  await click("toggle");
+  assert.equal(panels.at(-1), "menu");
+});

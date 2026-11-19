@@ -48,7 +48,7 @@
       "description": "启用网页评注或确认本页录制"
     }
   },
-  "version_name": "0.4.16 评注编号直接切换",
+  "version_name": "0.4.16 评注滚动与录制入口（r2）",
   "web_accessible_resources": [
     {
       "resources": [
