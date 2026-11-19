@@ -25,16 +25,16 @@ async function fixture() {
 test('插件主动登录未登录时去身份页，已登录自动接续无确认按钮；PKCE一次交换且原空间稳定',async()=>{
  const t=await fixture();const saved={user:{id:'alice',name:'测试'},session:{id:'session-a',expiresAt:new Date(Date.now()+3600000)}};
  t.identity(null);const unauth=await t.route(t.requestId);assert.equal(unauth.code,302);assert.match(unauth.location,/login\?next=/);
- t.identity(saved);const page=await t.route(t.requestId);assert(!page.body.includes('<button'));assert(!page.body.includes('登录并开启同步'));assert.equal(t.approvals(),0);
- let token,code;
- const ctx=vm.createContext({URLSearchParams,document:{querySelector:()=>({textContent:''})},chrome:{runtime:{sendMessage:async(id,message)=>{
+ t.identity(saved);const page=await t.route(t.requestId);assert(!page.body.includes('<button'));assert(!page.body.includes('正在返回网页'));assert(!page.body.includes('已登录，可以返回原网页'));assert(!page.body.includes('登录并开启同步'));assert.equal(t.approvals(),0);
+ let token,code,closed=false;
+ const ctx=vm.createContext({URLSearchParams,window:{close:()=>{closed=true}},document:{querySelector:()=>({textContent:''})},chrome:{runtime:{sendMessage:async(id,message)=>{
    assert.equal(id,'a'.repeat(32));assert.equal(message.requestId,t.requestId);
    if(message.type==='PAGE_REVIEW_LOGIN_PROOF')return {proof:t.proof};
    const callback=new URL(message.callbackUrl);assert.equal(callback.searchParams.get('state'),t.state);code=callback.searchParams.get('code');
    const response=await t.request('/auth/exchange',{method:'POST',data:{code,verifier:t.verifier}});assert.equal(response.status,200);token=(await response.json()).token;return {ok:true};
  }}},fetch:async(url,options)=>{assert.equal(url,'/page-review/authorize');const res=await t.route(t.requestId,'POST',options.body);return new Response(JSON.stringify(res.body),{status:res.code});}});
  await vm.runInContext(page.body.match(/<script>([\s\S]*)<\/script>/)[1],ctx);
- assert(token);assert.equal(t.approvals(),1);
+ assert(token);assert(closed);assert.equal(t.approvals(),1);
  assert.equal((await t.request('/auth/exchange',{method:'POST',data:{code,verifier:t.verifier}})).status,401);
  assert.equal((await t.request('/v1/me',{token})).status,200);
 });
