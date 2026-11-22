@@ -39,6 +39,7 @@ curl -fsSL https://review.paws.rodeo/install.sh | sh
 ```sh
 PAGE_REVIEW_BUN=/absolute/path/to/bun npm run build:cli
 PAGE_REVIEW_BUN=/absolute/path/to/bun npm run build:cli:light
+npm run test:cli-bundle
 node --test tests/installer.test.mjs tests/installer-delivery.test.mjs
 ```
 

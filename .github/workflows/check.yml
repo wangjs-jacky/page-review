@@ -17,6 +17,13 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run test:runtime
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.5'
+      - run: npm run build:cli:light
+        env:
+          PAGE_REVIEW_BUN: bun
+      - run: npm run test:cli-bundle
       - run: npm run build
       - uses: actions/upload-artifact@v4
         with:
