@@ -37,8 +37,9 @@ D1条件修订及幂等回执防止重复/过期覆盖。先上传R2并登记，
 | GET | /v1/assets/:sha256 | 当前未删除记录引用的私有附件 |
 | POST | /v1/cli/confirm | reader在执行机器保存配置后确认连接 |
 | GET | /v1/cli/connections | writer读取已确认机器，不返回凭证 |
-| POST | /v1/handoffs | writer生成本页固定清单 |
-| GET | /v1/handoffs/:id | 同空间授权读取固定清单，删除后410 |
+| POST | /v1/handoffs | 兼容旧扩展生成固定交接 |
+| GET | /v1/handoffs/:id | 同空间读取旧固定清单，删除后410 |
+| GET | /v1/handoffs/live-<id>?after=<marker> | 同空间读取该页最新完整记录。可带重复的 after 参数，任一保存未确认时返回409 |
 | GET | /v1/handoffs/:id/assets/:sha256 | 限本清单的不可变私有附件 |
 | GET / POST / DELETE | /v1/connections[/:id] | writer兼容管理与撤销reader |
 | DELETE | /v1/session | 当前凭证自行退出与撤销 |
@@ -66,3 +67,13 @@ PAGE_REVIEW_MINIFLARE_MODULE=file:///absolute/path/to/miniflare/dist/src/index.j
 该环境只监听127.0.0.1，使用独立合成空间；凭证仅在忽略的.local中，不进入日志、安装包或公开预览。Chrome权限与录制输入是测试适配，不把它当原生采集证明。
 
 官方资料：[Chrome tabCapture](https://developer.chrome.com/docs/extensions/reference/api/tabCapture)、[D1限制](https://developers.cloudflare.com/d1/platform/limits/)、[Workers限制](https://developers.cloudflare.com/workers/platform/limits/)、[Bun自包含可执行文件](https://bun.sh/docs/compiler/executables)。产品自身的上限与平台额度分别处理。
+
+新版插件依赖 `0005-live-pages.sql`。既有网页在打开该页评注菜单、刷新资料库或下一次保存时登记固定编号。新保存的同步标记与评注写入一起提交，附件先上传。固定编号读取不创建快照。旧固定交接仍可按原权限读取。
+
+## 网页引用升级（CLI 0.4.4 / 读取协议 1）
+
+部署顺序为：备份并核对当前Worker/绑定 → 按实际schema增量应用`0005-live-pages.sql`和`0006-cli-read-protocol.sql` → 发布全套`releases/0.4.4/`制品、manifest、两份SHA清单及`installers/0.4.4-r1.sh` → 切换包含live路由的Worker → 核对`livePageReferences:1` → 安装CLI并执行`page-review status`登记读取协议 → 验证原网页引用与附件。不得覆盖已缓存的0.4.3不可变资源。
+
+`livePageReferences`仅在必要schema和全套配套发行文件就绪时开启。旧终端确认的`readProtocol`为0，不能满足新同步门禁。缺映射的历史网页仅在当前授权空间内单次检查最多500个页键，超限返回明确回填需求；不后台扫描。空页由拥有者的明确读取动作登记，不创建业务评注。
+
+完整引用与`--after`必须原样传递。409表示该次保存尚未确认同步；404不允许改用资料库最近页面猜测目标。生产修复须核对活动模块和原引用实际业务结果，不能以健康页或本机测试代替。

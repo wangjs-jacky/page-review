@@ -1,16 +1,16 @@
 // Only these versioned public CLI files may enter the edge cache.
-export const VERSION = "0.4.3";
-export const INSTALLER_KEY = `installers/${VERSION}-r1.sh`;
-const legacyNames = ["page-review-darwin-arm64.tar.gz", "page-review-darwin-x64.tar.gz", "SHA256SUMS"],
-  lightNames = ["page-review-node.tar.gz", "SHA256SUMS.node"],
-  names = [...legacyNames, ...lightNames];
+import { CLI_VERSION, READ_PROTOCOL, CLI_FILES, INSTALLER_KEY } from "./cli-release.mjs";
+import { supportsLivePageSchema } from "./handoff.mjs";
+export const VERSION = CLI_VERSION;
+export { INSTALLER_KEY };
+const names = CLI_FILES;
 async function ready(env) {
   if (!env.RELEASES) return false;
   try {
     const object = await env.RELEASES.get(`releases/${VERSION}/manifest.json`),
       value = object && await new Response(object.body).json();
-    if (value?.version !== VERSION || !Array.isArray(value.files) ||
-        !legacyNames.every(name => value.files.includes(name))) return false;
+    if (value?.version !== VERSION || value.readProtocol !== READ_PROTOCOL || !Array.isArray(value.files) ||
+        !names.every(name => value.files.includes(name))) return false;
     // A single finite readiness check; no isolate promise/state shared across requests.
     return (await Promise.all([INSTALLER_KEY, ...names.map(n => `releases/${VERSION}/${n}`)]
       .map(key => env.RELEASES.head(key)))).every(Boolean);
@@ -20,8 +20,10 @@ export async function capabilities(env) {
   let origin = false;
   try { const u = new URL(env.API_ORIGIN); origin = u.origin === env.API_ORIGIN && u.protocol === "https:"; } catch {}
   const available = Boolean(origin && await ready(env));
+  const live = Boolean(available && await supportsLivePageSchema(env.DB));
   return { version: VERSION, regionalRecording: true, fixedHandoffs: true,
     terminalConnect: 1, cliAvailable: available,
+    livePageReferences: live ? 1 : 0, syncAfter: live ? 1 : 0,
     installUrl: available ? `${env.API_ORIGIN}/install.sh` : null };
 }
 function rangeOf(value, size) {
@@ -79,7 +81,7 @@ export async function distributionRoute(request, env, ctx) {
     return new Response(head ? null : object.body, { headers: { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "x-page-review-delivery": "r1" } });
   }
   const parts = path.split("/"), version = parts[2], name = parts[3];
-  if (parts.length !== 4 || ![VERSION, "0.4.2", "0.4.0"].includes(version) || !names.includes(name)) return notFound();
+  if (parts.length !== 4 || ![VERSION, "0.4.3", "0.4.2", "0.4.0"].includes(version) || !names.includes(name)) return notFound();
   if (!env.RELEASES) return notFound();
   const key = path.slice(1), cacheKey = new Request(url.origin + path), cache = globalThis.caches?.default,
     rangeHeader = request.headers.get("range");

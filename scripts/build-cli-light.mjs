@@ -4,9 +4,20 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { VERSION } from "../cli/page-review.mjs";
+import { CLI_VERSION as VERSION, READ_PROTOCOL, CLI_FILES, INSTALLER_KEY } from "../cloud/cli-release.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+export async function writeCliManifest(releaseRoot = root) {
+  const dir = path.join(releaseRoot, "dist/cli/releases", VERSION);
+  const files = [];
+  for (const name of CLI_FILES) {
+    try { await fs.access(path.join(dir, name)); files.push(name); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  const manifest = { version: VERSION, readProtocol: READ_PROTOCOL, files };
+  await fs.writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest) + "\n");
+  return manifest;
+}
 export async function buildLightCli() {
   const bun = process.env.PAGE_REVIEW_BUN || path.join(root, ".local/toolchain/bun-darwin-aarch64/bun");
   const dir = path.join(root, "dist/cli/releases", VERSION);
@@ -26,8 +37,9 @@ export async function buildLightCli() {
     const origin = process.env.PAGE_REVIEW_CLOUD_ORIGIN || "https://review.paws.rodeo";
     const installer = await renderCliInstaller(origin);
     await fs.mkdir(path.join(root, "dist/cli/installers"), { recursive: true });
-    await fs.writeFile(path.join(root, "dist/cli/installers", VERSION + "-r1.sh"), installer);
+    await fs.writeFile(path.join(root, "dist/cli", INSTALLER_KEY), installer);
     await fs.writeFile(path.join(root, "dist/cli/install.sh"), installer);
+    await writeCliManifest();
     console.log(`Node轻量CLI：${bytes.length}字节；尚未发布`);
     return { name, sum };
   } finally {

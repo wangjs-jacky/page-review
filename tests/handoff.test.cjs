@@ -177,3 +177,24 @@ test("未变快照并发复制共用同一引用，允许反复读取，修改�
   assert.notEqual(id, refs[0].id);
   assert.equal((await t.request("/v1/handoffs/" + refs[0].id, { token: r.token })).status, 200);
 });
+
+test("固定网页编号支持旧数据登记和删除最后一条，同名页面跨工作区不可读", async () => {
+  const t = await setup(), r = await ready(t);
+  const { livePageId } = await import("../cloud/handoff.mjs");
+  const page = t.note.pageId;
+  const route = "/v1/handoffs/" + await livePageId("workspace-1", page);
+  assert.equal((await t.save()).status, 200);
+  t.sql.prepare("DELETE FROM live_pages WHERE workspace_id=?").run("workspace-1");
+  // The existing reader resolves legacy page mappings without a writer refresh.
+  assert.equal((await t.request(route, { token: r.token })).status, 200);
+  assert.equal((await t.request(route, { token: t.other })).status, 404);
+  const marker = crypto.randomUUID();
+  const gone = await t.request("/v1/annotations/annotation-1", {
+    method: "DELETE",
+    data: { expectedRevision: 1, requestId: crypto.randomUUID(), syncMarkers: [marker], pageUrl: page },
+  });
+  assert.equal(gone.status, 200);
+  const latest = await t.request(route + "?after=" + marker, { token: r.token });
+  assert.equal(latest.status, 200);
+  assert.deepEqual((await latest.json()).records, []);
+});

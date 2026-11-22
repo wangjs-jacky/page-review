@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { CLI_VERSION, READ_PROTOCOL } from "../cloud/cli-release.mjs";
 
 const root = new URL("../", import.meta.url);
 const skillRoot = new URL("agent-skills/page-review/", root);
@@ -22,5 +23,7 @@ export async function renderCliInstaller(origin) {
     return `cat > "$work/skill/${file}" <<'${delimiter}' || exit 1\n${source}${delimiter}`;
   }));
   return template.replace("__API_ORIGIN__", () => origin)
+    .replace("__CLI_VERSION__", () => CLI_VERSION)
+    .replace("__READ_PROTOCOL__", () => String(READ_PROTOCOL))
     .replace("# __SKILL_PAYLOAD__", () => commands.join("\n"));
 }

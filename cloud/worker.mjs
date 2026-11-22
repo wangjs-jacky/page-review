@@ -1,5 +1,5 @@
 import { loginRoute } from "./login.mjs";
-import { handoffRoute, pageKey } from "./handoff.mjs";
+import { handoffRoute, pageKey, registerLivePage } from "./handoff.mjs";
 import { distributionRoute, capabilities } from "./distribution.mjs";
 // Personal cloud library. No model execution, timers, scheduled tasks or public asset bucket.
 const ID = /^[a-zA-Z0-9-]{8,80}$/,
@@ -281,6 +281,19 @@ async function commit(request, db, who, id, deleting) {
   );
   const clean = deleting ? null : validateNote(input.note, input.assets),
     workspace = who.workspace_id;
+  const markers = input.syncMarkers ?? [];
+  requireThat(Array.isArray(markers) && markers.every((marker) =>
+    typeof marker === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(marker)),
+    400, "invalid_marker", "同步标记无效");
+  const existing = deleting && expectedRevision > 0 && await db.prepare(
+    "SELECT json_extract(body_json,'$.note.pageId') AS page FROM annotations WHERE workspace_id=? AND id=?",
+  ).bind(workspace, id).first();
+  let page = clean?.note.pageId || existing?.page;
+  if (!page && deleting && expectedRevision === 0 && markers.length) {
+    try { page = pageKey(input.pageUrl); } catch {
+      requireThat(false, 400, "invalid_page", "网页地址无效");
+    }
+  }
   if (clean)
     for (const asset of clean.assets) {
       const stored = await db
@@ -300,6 +313,9 @@ async function commit(request, db, who, id, deleting) {
   const hash = await digest(
     JSON.stringify({ id, deleting, expectedRevision, clean }),
   );
+  const receipt = () => db.prepare(
+    "INSERT OR IGNORE INTO live_page_saves(workspace_id,page_id,marker) SELECT ?,?,value FROM json_each(?)",
+  ).bind(workspace, page, JSON.stringify(markers));
   const previous = await db
     .prepare(
       "SELECT payload_hash,response_json FROM operations WHERE workspace_id=? AND request_id=?",
@@ -313,6 +329,8 @@ async function commit(request, db, who, id, deleting) {
       "request_reused",
       "请求ID不能用于不同内容",
     );
+    if (page && markers.length)
+      await db.batch([await registerLivePage(db, workspace, page), receipt()]);
     return json(JSON.parse(previous.response_json));
   }
   const now = new Date().toISOString(),
@@ -416,6 +434,12 @@ async function commit(request, db, who, id, deleting) {
         requestId,
       ),
   );
+  if (page) {
+    statements.push(await registerLivePage(db, workspace, page));
+    if (markers.length) statements.push(db.prepare(
+      "INSERT OR IGNORE INTO live_page_saves(workspace_id,page_id,marker) SELECT ?,?,value FROM json_each(?) WHERE EXISTS(SELECT 1 FROM annotations WHERE workspace_id=? AND id=? AND mutation_id=?)",
+    ).bind(workspace, page, JSON.stringify(markers), workspace, id, requestId));
+  }
   await db.batch(statements);
   const saved = await db
     .prepare(

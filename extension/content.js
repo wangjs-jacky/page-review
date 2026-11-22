@@ -672,7 +672,7 @@
   }
   function copyMarkup() {
     const issue = state.copyIssue;
-    return `<div class="copy-region"><button class="btn primary copy-main" data-action="copy" ${state.copying ? "disabled" : ""}>${icon("copy")}${state.copying ? "正在准备…" : "复制本页评注"}</button><button class="text-button" data-action="copy-full" ${state.copying ? "disabled" : ""}>复制完整指令</button>${issue ? `<p class="inline-error" role="alert">${esc(issue.message)}<button class="text-button" data-action="${issue.action}" ${state.copying ? "disabled" : ""}>${issue.label}</button></p>` : ""}</div>`;
+    return `<div class="copy-region"><button class="btn primary copy-main" data-action="copy" ${state.copying ? "disabled" : ""}>${icon("copy")}${state.copying ? "正在复制…" : "复制本页评注"}</button><button class="text-button" data-action="copy-full" ${state.copying ? "disabled" : ""}>复制完整指令</button>${issue ? `<p class="inline-error" role="alert">${esc(issue.message)}<button class="text-button" data-action="${issue.action}" ${state.copying ? "disabled" : ""}>${issue.label}</button></p>` : ""}</div>`;
   }
   function renderPanel(focus = false) {
     if (!shadow) return;
@@ -1554,24 +1554,26 @@
     renderPanel();
     try {
       if (login) await send("CLOUD_LOGIN", { resume: "copy" });
-      const fixed = await send("CREATE_HANDOFF");
-      await loadNotes();
+      const fixed = await send("GET_PAGE_REFERENCE");
       state.copyText = format === "full" ? fixed.text : fixed.reference;
       try {
         await clipboard(state.copyText);
-        toast(format === "full" ? "已复制完整指令" : "已复制评注引用，可粘贴到 AI 对话");
+        toast(fixed.pending ? "已复制，最新评注正在同步" : format === "full" ? "已复制完整指令" : "已复制评注引用，可粘贴到 AI 对话");
       } catch {
         state.panel = "copy-fallback";
       }
     } catch (e) {
-      if (e.code === "login_required" || e.code === "cli_not_connected") {
+      if (["login_required", "cli_not_connected", "cli_update_required"].includes(e.code)) {
         state.copyResumePanel = state.panel || "menu";
         state.panel = "settings";
         state.cloud = e.code === "login_required" ? { configured: false } :
           await send("CLOUD_SETUP");
+        if (e.code === "cli_update_required") state.cloud.setupError = e.message;
         return;
       }
       const actions = {
+        service_update_required: { message: e.message, action: "copy-retry", label: "重试" },
+        cloud_unavailable: { message: e.message, action: "copy-retry", label: "重试" },
         account_mismatch: { message: "账号不一致", action: "login-copy", label: "登录原账号" },
         revision_conflict: { message: "评注有更新", action: "library", label: "查看冲突" },
       };

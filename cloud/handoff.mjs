@@ -21,6 +21,53 @@ async function snapshotId(workspace, page, records) {
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16),
     hex.slice(16, 20), hex.slice(20)].join("-");
 }
+export async function livePageId(workspace, page) {
+  const input = new TextEncoder().encode(JSON.stringify(["page-review-live-v1", workspace, page]));
+  const bytes = await crypto.subtle.digest("SHA-256", input);
+  return "live-" + Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+export async function supportsLivePageSchema(db) {
+  if (!db) return false;
+  try {
+    // LIMIT 0 validates required columns without scanning user records.
+    await db.prepare(
+      "SELECT p.workspace_id,p.id,p.page_id,s.workspace_id,s.page_id,s.marker,c.read_protocol,c.client_version FROM live_pages p,live_page_saves s,cli_connections c LIMIT 0",
+    ).all();
+    return true;
+  } catch {
+    return false;
+  }
+}
+export async function registerLivePage(db, workspace, page) {
+  const id = await livePageId(workspace, page);
+  return db.prepare(
+    "INSERT OR IGNORE INTO live_pages(workspace_id,id,page_id) VALUES(?,?,?)",
+  ).bind(workspace, id, page);
+}
+async function resolveLivePage(db, workspace, id, requireThat) {
+  const mapping = await db.prepare(
+    "SELECT page_id FROM live_pages WHERE workspace_id=? AND id=?",
+  ).bind(workspace, id).first();
+  if (mapping) return mapping;
+  // Pre-upgrade pages have no hash mapping. Resolve only this authorized
+  // workspace in one bounded read; no writer-page visit is required.
+  const pages = (await db.prepare(
+    "SELECT DISTINCT json_extract(body_json,'$.note.pageId') AS page_id FROM annotations WHERE workspace_id=? AND deleted_at IS NULL AND json_type(body_json,'$.note.pageId')='text' ORDER BY page_id LIMIT 501",
+  ).bind(workspace).all()).results || [];
+  requireThat(pages.length <= 500, 409, "live_backfill_required",
+    "旧网页较多，需要先完成网页编号回填；本次未把未解析编号当作不存在");
+  const candidates = await Promise.all(pages.map(async ({ page_id }) => ({
+    page_id, id: await livePageId(workspace, page_id),
+  })));
+  const match = candidates.find((page) => page.id === id);
+  if (!match) return null;
+  await (await registerLivePage(db, workspace, match.page_id)).run();
+  return { page_id: match.page_id };
+}
+const pageRows = (db, workspace, page) => db.prepare(
+  "SELECT * FROM annotations WHERE workspace_id=? AND deleted_at IS NULL AND json_extract(body_json,'$.note.pageId')=? ORDER BY updated_at DESC,id DESC LIMIT 501",
+).bind(workspace, page).all();
+const markerPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 export async function handoffRoute(
   request,
   env,
@@ -32,6 +79,49 @@ export async function handoffRoute(
     path = u.pathname,
     method = request.method,
     workspace = who.workspace_id;
+  const live = path.match(/^\/v1\/handoffs\/(live-[a-f0-9]{64})(?:\/assets\/([a-f0-9]{64}))?$/);
+  if (live && method === "GET") {
+    requireThat(await supportsLivePageSchema(db), 503, "live_upgrade_required",
+      "网页编号协议尚未就绪，请先完成云端迁移与终端升级");
+    const [, id, asset] = live;
+    const header = request.headers.get("X-Page-Review-After");
+    const markers = [...u.searchParams.getAll("after"), ...(header ? header.split(",") : [])];
+    requireThat(markers.every((marker) => markerPattern.test(marker)),
+      400, "invalid_marker", "同步标记无效");
+    const mapping = await resolveLivePage(db, workspace, id, requireThat);
+    if (markers.length) {
+      const received = mapping && await db.prepare(
+        "SELECT COUNT(*) AS count FROM live_page_saves WHERE workspace_id=? AND page_id=? AND marker IN (SELECT value FROM json_each(?))",
+      ).bind(workspace, mapping.page_id, JSON.stringify(markers)).first();
+      requireThat(received?.count === new Set(markers).size, 409,
+        "sync_pending", "尚未确认本次保存已完整同步，请核对插件同步状态后再读取");
+    }
+    requireThat(mapping, 404, "not_found", "网页编号不存在或不在授权范围");
+    if (asset) {
+      const member = await db.prepare(
+        "SELECT 1 FROM annotations AS n, json_each(n.body_json,'$.assets') AS a WHERE n.workspace_id=? AND n.deleted_at IS NULL AND json_extract(n.body_json,'$.note.pageId')=? AND json_extract(a.value,'$.id')=? LIMIT 1",
+      ).bind(workspace, mapping.page_id, asset).first();
+      requireThat(member, 404, "not_found", "附件不在当前网页评注中");
+      return readAsset(db, env, workspace, asset, requireThat);
+    }
+    const rows = (await pageRows(db, workspace, mapping.page_id)).results || [];
+    requireThat(rows.length <= 500, 413, "page_too_large", "本页超过500条，未返回部分记录");
+    const data = {
+      format: "page-review-handoff",
+      version: 1,
+      id,
+      pageUrl: mapping.page_id,
+      records: rows.map((row) => ({
+        ...context(row),
+        assets: JSON.parse(row.body_json).assets.map((a) => ({
+          ...a, sha256: a.id, path: `/v1/handoffs/${id}/assets/${a.id}`,
+        })),
+      })),
+    };
+    requireThat(new TextEncoder().encode(JSON.stringify(data)).length <= 1500000,
+      413, "page_too_large", "本页内容过大，未返回部分记录");
+    return json(data);
+  }
   if (path === "/v1/library" && method === "GET") {
     requireThat(
       who.kind === "writer",
@@ -73,6 +163,12 @@ export async function handoffRoute(
       "history_too_large",
       "历史较多，请按时间缩小范围",
     );
+    const pages = new Set(rows.map((row) => JSON.parse(row.body_json).note.pageId));
+    const pageIds = [...pages];
+    for (let offset = 0; offset < pageIds.length; offset += 50) {
+      const group = pageIds.slice(offset, offset + 50);
+      await db.batch(await Promise.all(group.map((page) => registerLivePage(db, workspace, page))));
+    }
     return json({
       complete: true,
       items: rows.map((row) => ({
@@ -110,6 +206,7 @@ export async function handoffRoute(
       "page_too_large",
       "本页超过500条，未返回部分记录",
     );
+    await (await registerLivePage(db, workspace, page)).run();
     return json({
       complete: true,
       items: rows.map((row) => ({
@@ -130,19 +227,30 @@ export async function handoffRoute(
       name = String(input.deviceName || "我的终端")
         .trim()
         .slice(0, 80),
+      readProtocol = input.readProtocol === undefined ? 0 : input.readProtocol,
+      clientVersion = input.clientVersion === undefined ? null : input.clientVersion,
       at = new Date().toISOString();
     requireThat(name, 400, "invalid_name", "执行机器名称无效");
+    requireThat(Number.isSafeInteger(readProtocol) && [0, 1].includes(readProtocol) &&
+      (clientVersion === null || (typeof clientVersion === "string" &&
+        clientVersion.length <= 80 && /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(clientVersion))) &&
+      (readProtocol === 0 || clientVersion !== null),
+      400, "invalid_protocol", "终端版本或读取协议声明无效");
+    requireThat(await supportsLivePageSchema(db), 503, "live_upgrade_required",
+      "终端协议登记尚未就绪，请先完成云端迁移");
     await db
       .prepare(
-        "INSERT INTO cli_connections(token_id,workspace_id,device_name,verified_at) VALUES(?,?,?,?) ON CONFLICT(token_id) DO UPDATE SET device_name=excluded.device_name,verified_at=excluded.verified_at",
+        "INSERT INTO cli_connections(token_id,workspace_id,device_name,verified_at,read_protocol,client_version) VALUES(?,?,?,?,?,?) ON CONFLICT(token_id) DO UPDATE SET device_name=excluded.device_name,verified_at=excluded.verified_at,read_protocol=excluded.read_protocol,client_version=excluded.client_version",
       )
-      .bind(who.id, workspace, name, at)
+      .bind(who.id, workspace, name, at, readProtocol, clientVersion)
       .run();
     return json({
       connected: true,
       access: "reader",
       deviceName: name,
       verifiedAt: at,
+      readProtocol,
+      clientVersion,
     });
   }
   if (path === "/v1/cli/connections" && method === "GET") {
@@ -154,7 +262,7 @@ export async function handoffRoute(
     );
     const rows = await db
       .prepare(
-        "SELECT c.token_id AS id,c.device_name,c.verified_at,t.revoked_at,t.expires_at FROM cli_connections c JOIN tokens t ON t.id=c.token_id WHERE c.workspace_id=? ORDER BY c.verified_at DESC",
+        "SELECT c.token_id AS id,c.device_name,c.verified_at,c.read_protocol,c.client_version,t.revoked_at,t.expires_at FROM cli_connections c JOIN tokens t ON t.id=c.token_id WHERE c.workspace_id=? ORDER BY c.verified_at DESC",
       )
       .bind(workspace)
       .all();
@@ -323,21 +431,7 @@ export async function handoffRoute(
         "not_found",
         "附件不在本次交接中",
       );
-      const meta = await db
-        .prepare("SELECT * FROM assets WHERE workspace_id=? AND id=?")
-        .bind(workspace, match[2])
-        .first();
-      requireThat(meta, 404, "not_found", "附件不存在");
-      const object = await env.FILES.get(meta.object_key);
-      requireThat(object, 404, "not_found", "附件不存在");
-      return new Response(object.body, {
-        headers: {
-          "content-type": meta.mime,
-          "content-length": String(meta.byte_length),
-          "cache-control": "private, no-store",
-          "x-content-type-options": "nosniff",
-        },
-      });
+      return readAsset(db, env, workspace, match[2], requireThat);
     }
     return json({
       ...fixed,
@@ -357,4 +451,22 @@ export async function handoffRoute(
     });
   }
   return null;
+}
+
+async function readAsset(db, env, workspace, id, requireThat) {
+  const meta = await db
+    .prepare("SELECT * FROM assets WHERE workspace_id=? AND id=?")
+    .bind(workspace, id)
+    .first();
+  requireThat(meta, 404, "not_found", "附件不存在");
+  const object = await env.FILES.get(meta.object_key);
+  requireThat(object, 404, "not_found", "附件不存在");
+  return new Response(object.body, {
+    headers: {
+      "content-type": meta.mime,
+      "content-length": String(meta.byte_length),
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
 }

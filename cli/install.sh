@@ -3,7 +3,8 @@ set -eu
 umask 077
 [ "$(uname -s)" = Darwin ] || { echo 'Page Review 首版仅支持 macOS' >&2; exit 1; }
 case "$(uname -m)" in arm64) arch=arm64;; x86_64) arch=x64;; *) echo '暂不支持此 Mac 架构' >&2; exit 1;; esac
-version=0.4.3
+version=__CLI_VERSION__
+read_protocol=__READ_PROTOCOL__
 origin='__API_ORIGIN__'
 flavor="${PAGE_REVIEW_CLI_FLAVOR:-auto}"
 has_node=false
@@ -124,6 +125,8 @@ candidate_version=$("$staging" --version </dev/null) || {
   printf '安装目录内的 CLI 未返回预期版本 %s，原CLI未改动\n' "$version" >&2
   exit 1
 }
+candidate_protocol=$("$staging" --protocol-version </dev/null) || { echo 'CLI读取协议校验失败，原CLI未改动' >&2; exit 1; }
+[ "$candidate_protocol" = "$read_protocol" ] || { echo 'CLI读取协议不支持本版网页引用，原CLI未改动' >&2; exit 1; }
 backup=$(mktemp -d "$install_dir/.page-review-backup.XXXXXX")
 if [ -e "$target" ] || [ -L "$target" ]; then
   cp -Pp "$target" "$backup/previous"
@@ -133,6 +136,8 @@ pending=true
 mv -f "$staging" "$target"
 installed_version=$("$target" --version </dev/null) || { echo '安装后版本校验失败，恢复原CLI' >&2; exit 1; }
 [ "$installed_version" = "$version" ] || { echo '安装后版本校验失败，恢复原CLI' >&2; exit 1; }
+installed_protocol=$("$target" --protocol-version </dev/null) || { echo '安装后读取协议校验失败，恢复原CLI' >&2; exit 1; }
+[ "$installed_protocol" = "$read_protocol" ] || { echo '安装后读取协议校验失败，恢复原CLI' >&2; exit 1; }
 pending=false
 echo "已安装：${target}（${flavor}），版本 $version 已验证"
 case ":$PATH:" in *":$install_dir:"*) echo '接着运行：page-review login';; *) echo '将 ~/.local/bin 加入 PATH，或运行：~/.local/bin/page-review login';; esac

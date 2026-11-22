@@ -317,13 +317,13 @@ async function handle(message, sender) {
     return draft.asset;
   }
   if (message.type === "COPY_TEXT") {
-    if (typeof message.text !== "string" || message.text.length > 16000)
+    if (typeof message.text !== "string" || message.text.length > 25600)
       throw Error("复制内容无效");
     return PageReviewRecorder.copy(message.text);
   }
-  if (message.type === "CREATE_HANDOFF") {
+  if (message.type === "GET_PAGE_REFERENCE") {
     const page = ownPage || Core.pageKey(message.pageUrl);
-    return Cloud.handoff(page);
+    return Cloud.pageReference(page);
   }
   if (message.type.startsWith("CLOUD_")) {
     if (

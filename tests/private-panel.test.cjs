@@ -104,11 +104,11 @@ test("signing in from connection settings resumes the pending clipboard action",
     send: async (type, payload) => {
       calls.push(type);
       if (type === "CLOUD_LOGIN") assert.equal(payload.resume, "copy");
-      if (type === "CREATE_HANDOFF") return { text: "example full instruction", reference: "example reference", count: 1 };
+      if (type === "GET_PAGE_REFERENCE") return { text: "example full instruction", reference: "example reference", count: 1 };
     },
   });
   await vm.runInContext(action + copy + '\naction({ action: "login" })', context);
-  assert.deepEqual(calls, ["CLOUD_LOGIN", "CREATE_HANDOFF", "example full instruction"]);
+  assert.deepEqual(calls, ["CLOUD_LOGIN", "GET_PAGE_REFERENCE", "example full instruction"]);
   assert.equal(state.panel, "notes");
   assert.equal(state.copyResumePanel, null);
 });

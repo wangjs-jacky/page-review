@@ -6,6 +6,7 @@ import http from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { CLI_VERSION, READ_PROTOCOL, CLI_CAPABILITIES } from "../cloud/cli-release.mjs";
 import { sendConnectionPage } from "./connection-page.mjs";
 import { terminalRelay } from "./terminal-intent.mjs";
 import {
@@ -14,7 +15,7 @@ import {
   validateConfig,
   verifyReader,
 } from "../agent-skills/page-review/scripts/connection.mjs";
-export const VERSION = "0.4.3",
+export const VERSION = CLI_VERSION,
   DEFAULT_API = "https://review.paws.rodeo";
 const hash = (data) => createHash("sha256").update(data).digest("hex");
 function origin(value) {
@@ -98,7 +99,7 @@ export async function confirm(config) {
     await api(config, "/v1/cli/confirm", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ deviceName: os.hostname().slice(0, 80) }),
+      body: JSON.stringify({ deviceName: os.hostname().slice(0, 80), clientVersion: VERSION, readProtocol: READ_PROTOCOL }),
     })
   ).json();
 }
@@ -281,19 +282,39 @@ async function bounded(response, maximum) {
   }
   return Buffer.concat(parts);
 }
-export async function readHandoff(config, id, out) {
+export async function readHandoff(config, id, out, { after } = {}) {
+  id = id?.replace(/^page-review-/, "");
+  const live = /^live-[a-f0-9]{64}$/.test(id || "");
+  const headers = {};
+  if (after !== undefined) {
+    const markers = after.split(",");
+    if (!live || !markers.every((marker) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(marker)))
+      throw Error("同步标记无效");
+    headers["X-Page-Review-After"] = [...new Set(markers)].join(",");
+  }
   if (!/^[a-zA-Z0-9-]{8,80}$/.test(id || "")) throw Error("交接ID无效");
   await verifyReader(config);
+  if (live) {
+    let capabilities;
+    try {
+      capabilities = await (await api(config, "/v1/capabilities")).json();
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      throw Error("Page Review 服务需要更新，暂不支持网页固定引用；原引用已保留");
+    }
+    if (capabilities.livePageReferences !== 1 || (after !== undefined && capabilities.syncAfter !== 1))
+      throw Error("Page Review 服务或配套CLI分发需要更新，暂不支持本次网页固定引用；原引用和同步要求已保留");
+  }
   const handoff = JSON.parse(
     (
-      await bounded(await api(config, "/v1/handoffs/" + id), 1600000)
+      await bounded(await api(config, "/v1/handoffs/" + id, { headers }), 1600000)
     ).toString(),
   );
   if (
     handoff.id !== id ||
     handoff.format !== "page-review-handoff" ||
     !Array.isArray(handoff.records) ||
-    !handoff.records.length ||
+    (!live && !handoff.records.length) ||
     handoff.records.length > 500
   )
     throw Error("交接清单不完整");
@@ -378,6 +399,14 @@ export async function main(args = process.argv.slice(2)) {
     console.log(VERSION);
     return;
   }
+  if (command === "--protocol-version") {
+    console.log(READ_PROTOCOL);
+    return;
+  }
+  if (command === "--capabilities") {
+    console.log(JSON.stringify(CLI_CAPABILITIES));
+    return;
+  }
   if (command === "login" || (command === "connect" && !option("--from"))) {
     console.error("正在连接终端；浏览器已登录时会自动继续。");
     console.log(
@@ -421,14 +450,14 @@ export async function main(args = process.argv.slice(2)) {
       return;
     }
     console.log(
-      JSON.stringify(await readHandoff(c, rest[0], option("--out")), null, 2),
+      JSON.stringify(await readHandoff(c, rest[0], option("--out"), { after: option("--after") }), null, 2),
     );
     return;
   }
   console.log(
     "Page Review " +
       VERSION +
-      " (macOS)\n\npage-review login\npage-review status\npage-review read <交接ID> [--out 目录]\npage-review logout",
+      " (macOS)\n\npage-review login\npage-review status\npage-review read <交接ID> [--after 同步标记] [--out 目录]\npage-review logout",
   );
 }
 if (
