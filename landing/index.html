@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Page Review 是一款桌面 Chrome 网页批注扩展。保存当时的画面和想法，把评注交给终端 AI。">
+  <meta name="theme-color" content="#eaf1f8">
+  <link rel="icon" href="assets/f5.png" type="image/png">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="ink-fox.css">
+  <link rel="stylesheet" href="workflow.css">
+  <script src="demo.js" defer></script>
+  <script src="workflow.js" defer></script>
+  <title>Page Review · 把想法留在网页上</title>
+</head>
+<body id="top">
+  <a class="skip" href="#main">跳到正文</a>
+  <header class="header wrap">
+    <a class="brand" href="#top"><img src="assets/f5.png" width="38" height="38" alt=""><span class="wordmark">Page Review<img src="assets/ink-fox-mark.svg" width="16" height="16" alt=""></span></a>
+    <nav aria-label="主导航">
+      <a class="nav-demo" href="#demo">交互示例</a>
+      <a class="nav-how" href="#workflow-title">使用方式</a>
+      <a class="nav-install" href="#install">安装指南</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="kicker"><span></span>桌面 Chrome 扩展</p>
+        <h1 id="hero-title">把想法留在<span class="title-accent"><img src="assets/ink-fox-title.svg" width="72" height="60" alt="">网页上</span></h1>
+        <p class="intro">点选或框住页面的一处，保存截图和你的评注。下次打开同一页可以找回原评注，也能把评注和截图交给终端 AI。</p>
+        <div class="actions">
+          <a class="button primary" href="#install">查看安装与下载</a>
+          <a class="button plain" href="#demo">试试示例</a>
+        </div>
+      </div>
+      <div class="mascot-stage">
+        <div class="mascot-card">
+          <img class="mascot" src="assets/ink-fox-detailed.webp" alt="" width="1040" height="1040" fetchpriority="high">
+          <details class="hero-annotation" open>
+            <summary class="product-pin" aria-label="查看便签上的评注">01</summary>
+            <div class="hero-note"><strong>便签评注</strong><p>保留这个橙色折角，让便签更容易认出来。</p></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="demo-section wrap" aria-labelledby="demo-heading">
+      <div class="demo-heading">
+        <p class="kicker"><span></span>交互示例</p>
+        <h2 id="demo-heading">在网页上<br class="desktop-break">留个标记</h2>
+        <p>从留下画面，到找回原处，再把本页评注交给终端 AI。</p>
+      </div>
+      <figure class="demo" id="demo" data-mode="revisit" data-pin="0" aria-labelledby="demo-label">
+        <div class="demo-top">
+          <figcaption id="demo-label"><span class="sample-dot"></span> 交互示例</figcaption>
+          <span class="sample-address">fieldnotes.example / issue-07</span>
+        </div>
+        <div class="demo-controls" role="group" aria-label="切换示例场景" aria-describedby="scene-guide">
+          <button type="button" data-scene="capture" aria-pressed="false" aria-controls="note-title note-copy">截图批注</button>
+          <button type="button" data-scene="revisit" aria-pressed="true" aria-controls="note-title note-copy">再次打开网页</button>
+          <button type="button" data-scene="handoff" aria-pressed="false" aria-controls="note-title note-copy handoff-demo">交给 AI</button>
+        </div>
+        <p class="scene-guide" id="scene-guide">点击网页上的编号，查看当时留下的评注。</p>
+        <div class="demo-stage">
+          <div class="sample-page" aria-hidden="true">
+            <div class="sample-nav"><b>FIELDNOTES</b><span>VOL. 07 / THE COAST</span></div>
+            <div class="sample-body">
+              <div class="sample-type"><span>THE COASTAL ISSUE</span><strong>Where<br>the land<br>ends.</strong></div>
+              <div class="landscape"><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="sample-footer">A JOURNAL OF PLACES &amp; PERSPECTIVES</div>
+          </div>
+          <div class="selection" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <div class="demo-pins" role="group" aria-label="网页上的评注编号">
+            <button class="pin" type="button" data-pin="0" aria-label="查看评注 1" aria-pressed="true">01</button>
+            <button class="pin" type="button" data-pin="1" aria-label="查看评注 2" aria-pressed="false">02</button>
+            <button class="pin" type="button" data-pin="2" aria-label="查看评注 3" aria-pressed="false">03</button>
+          </div>
+          <div class="note">
+            <img src="assets/f5.png" width="30" height="30" alt="">
+            <div role="status" aria-atomic="true">
+              <strong id="note-title">评注 01</strong>
+              <p id="note-copy">保留这段留白，标题会更容易读。</p>
+            </div>
+          </div>
+          <button type="button" class="demo-orb" aria-label="打开网页评注" aria-expanded="false" aria-controls="handoff-demo">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m16 3 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L3 16l-1 6Z"/></svg>
+            <span aria-hidden="true">3</span>
+          </button>
+          <section class="handoff-demo" id="handoff-demo" aria-label="本页评注与模拟终端" hidden>
+            <div class="handoff-head">
+              <span>本页评注 · 3 条</span>
+              <button type="button" class="copy-demo">复制本页评注</button>
+            </div>
+            <div class="terminal" aria-label="示例终端" hidden>
+              <div class="terminal-bar"><span aria-hidden="true"></span> 终端 AI · 模拟</div>
+              <div class="terminal-body">
+                <button class="paste-demo" type="button"><code>❯</code> 粘贴示例引用</button>
+                <div class="terminal-result" role="status" hidden>
+                  <p class="terminal-command">❯ 读取本页评注 <code>page-review-…b142</code></p>
+                  <p>✓ 已读取 3 条评注与关联截图</p>
+                  <blockquote>01　保留这段留白，标题会更容易读。</blockquote>
+                  <p>❯ <span class="terminal-caret" aria-hidden="true"></span></p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </figure>
+    </section>
+
+    <section class="story wrap" aria-labelledby="story-title">
+      <h2 id="story-title">为什么要<span>记住现场</span></h2>
+      <div class="story-body">
+        <p class="story-line is-current"><span>网页会变。截图保留了你看到的画面，评注留下了你当时的判断。</span><img src="assets/ink-fox-mark.svg" width="32" height="32" alt=""></p>
+        <p class="story-line"><span>下次回到原页，或者把评注交给 AI，你和它都有具体的画面可以对照。</span><img src="assets/ink-fox-mark.svg" width="32" height="32" alt=""></p>
+      </div>
+    </section>
+
+    <section class="workflow wrap" aria-labelledby="workflow-title">
+      <div class="section-heading">
+        <h2 id="workflow-title">从网页现场，<br>到可以回看的记录</h2>
+        <p>评注和当时的画面一起保存，回看时能知道自己指的是哪一处。</p>
+      </div>
+      <div class="workflow-content">
+        <ol class="steps">
+          <li class="workflow-step">
+            <h3>
+              <button class="chapter-button" type="button" aria-controls="workflow-video" data-start="3" data-end="12" data-seek="7" disabled>
+                <span class="chapter-marker" aria-hidden="true">01</span>
+                <span class="chapter-title">在网页上直接评注</span>
+                <span class="chapter-cue"><span class="workflow-sr-only">跳到短片 </span><time datetime="PT7S">0:07</time></span>
+              </button>
+            </h3>
+            <p>点选元素、框选区域，或评论整页。整页评注附上保存时的可见画面。需要展示变化时，也可以录制一段区域视频。</p>
+          </li>
+          <li class="workflow-step">
+            <h3>
+              <button class="chapter-button" type="button" aria-controls="workflow-video" data-start="12" data-end="16" data-seek="15" disabled>
+                <span class="chapter-marker" aria-hidden="true">02</span>
+                <span class="chapter-title">再次打开网页时找回评注</span>
+                <span class="chapter-cue"><span class="workflow-sr-only">跳到短片 </span><time datetime="PT15S">0:15</time></span>
+              </button>
+            </h3>
+            <p>同一网页上的位置能可靠匹配时，标记会重新出现。页面变化太大时，可以到历史记录看原评注和截图。</p>
+          </li>
+          <li class="workflow-step">
+            <h3>
+              <button class="chapter-button" type="button" aria-controls="workflow-video" data-start="16" data-end="21" data-seek="20" disabled>
+                <span class="chapter-marker" aria-hidden="true">03</span>
+                <span class="chapter-title">把本页评注交给 AI</span>
+                <span class="chapter-cue"><span class="workflow-sr-only">跳到短片 </span><time datetime="PT20S">0:20</time></span>
+              </button>
+            </h3>
+            <p>登录后将资料同步到私人云空间。完成只读授权后，复制「本页评注」给终端 AI，它可通过 Page Review CLI 读取已同步的评注和附件。</p>
+          </li>
+        </ol>
+        <div class="film" id="film">
+          <div class="workflow-film-heading">
+            <p class="film-caption">从框选网页到把评注交给 AI</p>
+            <span class="workflow-film-time" aria-hidden="true">0:24</span>
+          </div>
+          <video id="workflow-video" controls playsinline preload="none" poster="assets/page-review-motion-poster.jpg"
+                 width="1920" height="1080" aria-label="Page Review 使用过程短片">
+            <source src="assets/page-review-motion.mp4" type="video/mp4">
+            <a href="assets/page-review-motion.mp4">打开产品短片（MP4）</a>
+          </video>
+          <p class="workflow-film-status workflow-sr-only" role="status"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="install wrap" id="install" aria-labelledby="install-title">
+      <div class="install-panel"><img class="install-mascot" src="assets/ink-fox-peek.svg" alt="" width="96" height="74" loading="lazy">
+        <div class="install-copy">
+          <img class="install-icon" src="assets/f5.png" width="72" height="72" alt="">
+          <h2 id="install-title">在桌面 Chrome<br>开始使用</h2>
+          <p>在 GitHub 下载 Chrome 扩展 ZIP，解压后按下方步骤加载。</p>
+          <a class="button release" href="https://github.com/wangjs-jacky/page-review/releases/download/v0.4.16/page-review-0.4.16-r2.zip">下载 Chrome 扩展 <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="install-steps">
+          <h3>手动安装</h3>
+          <ol>
+            <li>下载并解压上方的 Chrome 扩展 ZIP。</li>
+            <li>在桌面 Chrome 地址栏输入 <code>chrome://extensions</code>，打开「开发者模式」。</li>
+            <li>点「加载已解压的扩展程序」，选择包含 <code>manifest.json</code> 的文件夹。</li>
+          </ol>
+          <p>已有安装时，将新文件覆盖到原目录，再到扩展管理页重新加载并刷新目标网页。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer wrap">
+    <a class="brand" href="#top"><img src="assets/f5.png" width="32" height="32" alt="">Page Review</a>
+    <a href="#top">返回顶部 ↑</a>
+  </footer>
+</body>
+</html>

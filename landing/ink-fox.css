@@ -1,0 +1,192 @@
+@font-face {
+  font-family: 'Page Review Title';
+  src: url('assets/noto-serif-sc-titles.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+:root {
+  --display: 'Page Review Title', 'Noto Serif SC', 'Songti SC', STSong, serif;
+  --story-ink: #4c2e1d;
+}
+
+h1, h2 {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: -.045em;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 3px;
+}
+.brand .wordmark img {
+  width: 15px;
+  height: 15px;
+  border-radius: 0;
+  transform: translateY(-4px) rotate(-8deg);
+}
+
+.hero h1 .title-accent {
+  display: flex;
+  align-items: baseline;
+  gap: .12em;
+  white-space: nowrap;
+}
+.title-accent img {
+  flex: none;
+  width: .76em;
+  height: auto;
+  transform-origin: 65% 88%;
+  transition: transform .22s ease-out;
+}
+.hero h1:hover .title-accent img { transform: translateY(-.05em) rotate(-4deg); }
+.hero h1 .title-accent::after {
+  left: .78em;
+  right: -.24em;
+}
+
+.hero-annotation {
+  --pin-x: 77%;
+  --pin-y: 65%;
+}
+.hero-annotation .product-pin {
+  top: var(--pin-y);
+  left: var(--pin-x);
+  transform: translate(-50%, -50%);
+}
+.hero-annotation .product-pin:focus-visible {
+  outline: 2px solid #164cc7;
+  outline-offset: 3px;
+}
+.hero-note {
+  top: calc(var(--pin-y) + 20px);
+  left: 25%;
+  width: min(57%, 242px);
+}
+
+.demo-controls button::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-inline-end: 5px;
+  vertical-align: -.25em;
+  background: url('assets/ink-fox-mark.svg') center / contain no-repeat;
+  visibility: hidden;
+}
+.demo-controls button[aria-pressed="true"]::before { visibility: visible; }
+.scene-guide {
+  margin: 0;
+  padding: 7px 12px 8px;
+  border-bottom: 1px solid #17447516;
+  color: var(--body);
+  background: #f8fbffac;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.terminal .paste-demo:focus-visible {
+  outline: 2px solid #9ad5ff;
+  outline-offset: 2px;
+}
+
+.story {
+  position: relative;
+  isolation: isolate;
+  margin-top: clamp(48px, 6vw, 86px);
+  padding: clamp(34px, 5.8vw, 82px) clamp(23px, 7vw, 96px);
+  color: var(--story-ink);
+  border: 1px solid #fff8ef;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle, #fffaf0bf 1px, transparent 1.5px) 0 0 / 22px 22px,
+    radial-gradient(ellipse at 12% 10%, #fff6e8a0, transparent 68%),
+    linear-gradient(130deg, #f7e0c5, #efc49e);
+  box-shadow: var(--glass-shadow), inset 0 1px #fff6e7;
+}
+.story h2 {
+  position: relative;
+  z-index: 0;
+  margin: 0 0 clamp(23px, 3vw, 44px);
+  font-size: clamp(33px, 5.5vw, 72px);
+  line-height: 1.22;
+}
+.story h2 span {
+  position: relative;
+  display: inline-block;
+}
+.story h2 span::after {
+  position: absolute;
+  inset: -.08em -.15em -.13em;
+  z-index: -1;
+  content: '';
+  border: 1.5px solid #9c3f2ac4;
+  border-left-color: #9c3f2a55;
+  border-radius: 39% 57% 42% 54%;
+  transform: rotate(-7deg);
+}
+.story-body { max-width: 900px; }
+.story-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin: 0;
+  padding: 13px 0 16px;
+  border-top: 1px solid #92552a38;
+  color: var(--story-ink);
+  font-size: clamp(17px, 2vw, 28px);
+  line-height: 1.65;
+}
+.story-line img {
+  width: clamp(22px, 3vw, 38px);
+  height: auto;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .2s ease, transform .2s ease;
+}
+.story-line.is-current img {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.install-panel { overflow: visible; }
+.install-mascot {
+  width: clamp(83px, 16vw, 176px);
+  z-index: 0;
+  inset: 1px clamp(19px, 8vw, 107px) auto auto;
+  transform: translateY(-87%);
+  opacity: 1;
+  pointer-events: none;
+}
+
+@media (max-width: 950px) {
+  .demo-controls button::before {
+    width: 15px;
+    height: 15px;
+    margin-inline-end: 3px;
+  }
+}
+@media (max-width: 760px) {
+  .story { padding-inline: 21px; }
+  .mascot-card { width: min(100%, 325px); }
+  .hero-note { left: 23%; width: 65%; padding: 7px 9px; font-size: 12px; }
+}
+@media (max-width: 440px) {
+  .demo-controls button::before {
+    display: block;
+    width: 14px;
+    height: 14px;
+    margin: 0 auto 2px;
+  }
+  .scene-guide {
+    padding-inline: 7px;
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .title-accent img, .story-line img { transition: none; }
+  .hero h1:hover .title-accent img { transform: none; }
+}
