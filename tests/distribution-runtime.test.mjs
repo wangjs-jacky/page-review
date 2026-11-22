@@ -8,7 +8,7 @@ test("真实workerd/R2：公开完整包缓存、206续传、条件读取及私�
   if (!process.env.PAGE_REVIEW_MINIFLARE_MODULE) return t.skip("需指定已有Miniflare模块");
   const runtime = await import(process.env.PAGE_REVIEW_MINIFLARE_MODULE);
   const options = {
-    modules: ["worker.mjs", "login.mjs", "handoff.mjs", "distribution.mjs"].map(name => ({
+    modules: ["worker.mjs", "login.mjs", "handoff.mjs", "distribution.mjs", "cli-release.mjs"].map(name => ({
       type: "ESModule", path: path.join(root, "cloud", name),
     })),
     modulesRoot: path.join(root, "cloud"),

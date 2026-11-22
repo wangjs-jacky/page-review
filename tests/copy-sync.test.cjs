@@ -3,10 +3,11 @@ const assert = require("node:assert/strict");
 const vm = require("node:vm"), fs = require("node:fs"), path = require("node:path");
 const crypto = require("node:crypto");
 const { setup, png } = require("./helpers/cloud.cjs");
-async function client() {
+async function client({ readProtocol = 1 } = {}) {
   const server = await setup(), reader = await server.reader();
   await server.request("/v1/cli/confirm", {
-    method: "POST", token: reader.token, data: { deviceName: "Test Mac" },
+    method: "POST", token: reader.token,
+    data: { deviceName: "Test Mac", readProtocol, clientVersion: readProtocol ? "0.4.4" : "0.4.3" },
   });
   const notes = new Map(), images = new Map(), rows = new Map(), calls = [];
   const data = { cloudConnection: {
@@ -36,6 +37,7 @@ async function client() {
     importPage: async () => {},
   };
   let failUpload = 0;
+  const serviceCapabilities = { livePageReferences: 1, cliAvailable: true };
   const context = vm.createContext({ crypto, AbortSignal, URL, TextEncoder, Uint8Array,
     DataView, atob, btoa, PageReviewCore: require("../extension/core.js") });
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../extension/cloud.js"), "utf8"), context);
@@ -43,6 +45,8 @@ async function client() {
     storage: { get: async key => ({ [key]: data[key] }), set: async v => Object.assign(data, v) },
     fetcher: async (url, options = {}) => {
       const u = new URL(url); calls.push({ path: u.pathname, ...options });
+      if (u.pathname === "/v1/capabilities")
+        return Response.json(serviceCapabilities);
       if (u.pathname.startsWith("/v1/uploads/") && failUpload-- > 0)
         throw Error("offline");
       return server.request(u.pathname + u.search, {
@@ -57,7 +61,7 @@ async function client() {
     notes.set(id, { ...server.note, id, revision: 1, ...changes });
     if (image) images.set(id, image);
   };
-  return { server, reader, api, add, notes, rows, calls, data,
+  return { server, reader, api, add, notes, rows, calls, data, serviceCapabilities,
     failUpload: n => { failUpload = n; } };
 }
 test("复制直接补齐未入队的当前页截图和区域录制，终端读回原话与全部附件", async () => {
@@ -82,6 +86,48 @@ test("复制直接补齐未入队的当前页截图和区域录制，终端读�
     assert.equal(response.status, 200);
     assert.equal(crypto.createHash("sha256").update(Buffer.from(await response.arrayBuffer())).digest("hex"), asset.id);
   }
+});
+
+test("旧服务不能复制一个终端无法读取的网页引用", async () => {
+  const t = await client();
+  t.add("saved-note", { cloud: { workspaceId: "workspace-1", status: "synced" } });
+  delete t.serviceCapabilities.livePageReferences;
+  await assert.rejects(t.api.pageReference(t.server.note.pageId),
+    e => e.code === "service_update_required");
+  assert(!t.calls.some(c => c.method && c.method !== "GET"));
+});
+
+test("旧终端确认不能满足带同步门禁的网页引用读取", async () => {
+  const t = await client({ readProtocol: 0 });
+  t.add("saved-note", { cloud: { workspaceId: "workspace-1", status: "synced" } });
+  await assert.rejects(t.api.pageReference(t.server.note.pageId),
+    e => e.code === "cli_update_required");
+  assert(!t.calls.some(c => c.method && c.method !== "GET"));
+});
+
+test("过期或要求重新认证的连接不能离线声称复制成功", async () => {
+  for (const change of [{ authenticationRequired: true }, { expiresAt: "2020-01-01T00:00:00Z" }]) {
+    const t = await client();
+    Object.assign(t.data.cloudConnection, change);
+    t.add("saved-note", { cloud: { workspaceId: "workspace-1", status: "synced" } });
+    await assert.rejects(t.api.pageReference(t.server.note.pageId),
+      e => e.code === "login_required");
+    assert.equal(t.calls.length, 0);
+  }
+});
+
+test("空页复制明确登记目标网页，终端读取零条而非复制成功后404", async () => {
+  const t = await client(), page = t.server.note.pageId;
+  const copied = await t.api.pageReference(page);
+  assert.equal(copied.pending, false);
+  const id = copied.reference.slice("page-review-".length);
+  const read = await t.server.request("/v1/handoffs/" + id, { token: t.reader.token });
+  assert.equal(read.status, 200);
+  const context = await read.json();
+  assert.equal(context.pageUrl, page);
+  assert.deepEqual(context.records, []);
+  assert.equal(t.calls.filter(c => c.path === "/v1/pages").length, 1);
+  assert.equal(t.server.sql.prepare("SELECT COUNT(*) AS count FROM annotations").get().count, 0);
 });
 test("当前页超过100条待传时单次完整复制，不受其他页面队列影响", async () => {
   const t = await client();
@@ -149,4 +195,46 @@ test("快速复制保留完整云端快照，远端修订变化时刷新一次�
   const read=await t.server.request('/v1/handoffs/'+again.id,{token:t.reader.token});
   assert.equal((await read.json()).records[0].comment,'另一端的新原话');
   assert.equal(t.calls.filter(c=>c.path==='/v1/pages').length,1);
+});
+
+test("复制只检查协议就绪，带同步标记的读取在截图齐全前失败，随后读到最新附件", async () => {
+  const t = await client();
+  const page = t.server.note.pageId;
+  const image = "data:image/png;base64," + png.toString("base64");
+  t.add("live-screenshot", { hasImage: true }, { viewport: image, width: 1, height: 1 });
+  // Emulate the persisted save event. The uploader remains offline until explicitly retried.
+  const original = t.notes.get("live-screenshot");
+  const marker = crypto.randomUUID();
+  const note = { ...original, comment: "刚保存的新截图", revision: 2, hasImage: true,
+    cloud: { workspaceId: "workspace-1", remoteRevision: 0, status: "pending" } };
+  t.notes.set(note.id, note);
+  t.rows.set(note.id, { id: note.id, requestId: marker, syncMarkers: [marker],
+    workspaceId: "workspace-1", kind: "upsert", remoteRevision: 0, localRevision: 2, note });
+  t.failUpload(1);
+  await t.api.sync({ page });
+  const beforeCopy = t.calls.length;
+  const copied = await t.api.pageReference(page);
+  assert.deepEqual(t.calls.slice(beforeCopy).map(call => call.path).sort(),
+    ["/v1/capabilities", "/v1/cli/connections"]);
+  const [reference, requirement] = copied.reference.split("\n");
+  assert.match(reference, /^page-review-live-[a-f0-9]{64}$/);
+  assert(copied.text.includes("page-review read " + reference + " --after " + marker));
+  assert.equal(requirement, "同步要求：--after " + marker);
+  const read = "/v1/handoffs/" + reference.slice("page-review-".length);
+  const waiting = await t.server.request(read + "?after=" + marker, { token: t.reader.token });
+  assert.equal(waiting.status, 409);
+  assert.equal((await waiting.json()).code, "sync_pending");
+  await t.api.sync({ page });
+  const afterSync = t.calls.length;
+  assert.equal((await t.api.pageReference(page)).reference, reference);
+  assert.deepEqual(t.calls.slice(afterSync).map(call => call.path).sort(),
+    ["/v1/capabilities", "/v1/cli/connections"]);
+  const complete = await t.server.request(read + "?after=" + marker, { token: t.reader.token });
+  assert.equal(complete.status, 200);
+  const [record] = (await complete.json()).records;
+  assert.equal(record.comment, "刚保存的新截图");
+  assert.equal(record.assets.length, 1);
+  const response = await t.server.request(record.assets[0].path, { token: t.reader.token });
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+  assert.equal((await t.server.request(read, { token: t.server.other })).status, 404);
 });

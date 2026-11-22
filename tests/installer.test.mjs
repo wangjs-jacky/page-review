@@ -89,6 +89,13 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
         const result = await run();
         assert.match(result.stdout, new RegExp(`版本 ${RegExp.escape(VERSION)} 已验证`), result.stderr);
         assert.equal((await exec(target, ["--version"], { env })).stdout.trim(), VERSION);
+        assert.equal((await exec(target, ["--protocol-version"], { env })).stdout.trim(), "1");
+        if (!payload) {
+          const capabilities = JSON.parse((await exec(target, ["--capabilities"], { env })).stdout);
+          assert.equal(capabilities.version, VERSION);
+          assert.equal(capabilities.livePageReferences, 1);
+          assert.equal(capabilities.syncAfter, 1);
+        }
         assert.equal((await fs.stat(target)).mode & 0o777, 0o755);
         if (!hosts) assert.match(result.stdout, /未检测到 Codex 或 Claude Code/);
         else {
@@ -122,13 +129,14 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
     await check("没有Node：真实本机架构自包含包可运行", { runtime: "missing", selected: "standalone" });
     await check("旧Node：回退自包含包", { runtime: "old", selected: "standalone" });
     await check("Node无法启动：回退自包含包", { runtime: "broken", selected: "standalone" });
-    const versionScript = `#!/bin/sh\nprintf '%s\\n' '${VERSION}'\n`;
+    const versionScript = `#!/bin/sh\nif [ "$1" = --protocol-version ]; then echo 1; else echo ${VERSION}; fi\n`;
     await check("Intel架构选择x64包（模拟架构，非Intel真机验收）", { runtime: "missing", selected: "standalone", arch: "x86_64", payload: await fixture(versionScript) });
     await check("摘要错误保留旧CLI", { badHash: true, fail: true, error: /安装包校验失败/ });
     await check("下载失败保留旧CLI", { downloadFailure: true, fail: true, error: /404/ });
     await check("错误版本即使零退出也拒绝覆盖", { runtime: "missing", selected: "standalone", payload: await fixture("#!/bin/sh\necho 0.0.0\n"), fail: true, error: /CLI版本校验失败|CLI版本命令未正常退出/ });
     await check("版本命令非零退出拒绝覆盖", { runtime: "missing", selected: "standalone", payload: await fixture(`#!/bin/sh\necho ${VERSION}\nexit 1\n`), fail: true, error: /CLI版本校验失败|CLI版本命令未正常退出/ });
-    const basenameSensitive = await fixture(`#!/bin/sh\n[ "\${0##*/}" = page-review ] || exit 7\necho ${VERSION}\n`);
+    await check("版本相同但不支持live协议的旧实现拒绝覆盖", { runtime: "missing", selected: "standalone", payload: await fixture(`#!/bin/sh\necho ${VERSION}\n`), fail: true, error: /CLI读取协议不支持/ });
+    const basenameSensitive = await fixture(`#!/bin/sh\n[ "\${0##*/}" = page-review ] || exit 7\nif [ "$1" = --protocol-version ]; then echo 1; else echo ${VERSION}; fi\n`);
     await check("保留 CLI 文件名执行安装目录预检", {
       runtime: "missing", selected: "standalone", payload: basenameSensitive,
     });
@@ -137,9 +145,11 @@ test("真实HTTPS安装：自动选择运行时、版本校验与失败恢复", 
       runtime: "missing", selected: "standalone", payload: stageFailure, fail: true,
       error: /安装目录内的 CLI 版本命令执行失败（退出码 7）/,
     });
-    const postFailure = await fixture(`#!/bin/sh\ncase "$0" in *"/install with spaces/page-review") echo wrong;; *) echo ${VERSION};; esac\n`);
+    const postFailure = await fixture(`#!/bin/sh\ncase "$0" in *"/install with spaces/page-review") echo wrong;; *) if [ "$1" = --protocol-version ]; then echo 1; else echo ${VERSION}; fi;; esac\n`);
     await check("最终安装路径版本验证失败恢复旧CLI", { runtime: "missing", selected: "standalone", payload: postFailure, fail: true, error: /安装后版本校验失败/ });
     await check("首次安装后验证失败移除新CLI", { runtime: "missing", selected: "standalone", payload: postFailure, installed: false, fail: true, error: /安装后版本校验失败/ });
+    const postProtocolFailure = await fixture(`#!/bin/sh\nif [ "$1" = --protocol-version ]; then case "$0" in *"/install with spaces/page-review") echo 0;; *) echo 1;; esac; else echo ${VERSION}; fi\n`);
+    await check("最终路径读取协议变化时恢复旧CLI", { runtime: "missing", selected: "standalone", payload: postProtocolFailure, fail: true, error: /安装后读取协议校验失败/ });
     console.log(JSON.stringify({ lightArchiveBytes: light.length, nativeArchiveBytes: native.length, node: process.version, nativeArch: process.arch }));
   } finally {
     server.closeAllConnections(); await new Promise(r => server.close(r));

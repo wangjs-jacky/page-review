@@ -15,7 +15,7 @@ const root = path.resolve(
   ),
   key = randomBytes(32).toString("hex");
 const options = {
-  modules: ["worker.mjs", "login.mjs", "handoff.mjs", "distribution.mjs"].map(
+  modules: ["worker.mjs", "login.mjs", "handoff.mjs", "distribution.mjs", "cli-release.mjs"].map(
     (name) => ({ type: "ESModule", path: path.join(root, "cloud", name) }),
   ),
   modulesRoot: path.join(root, "cloud"),
@@ -33,7 +33,7 @@ const mf = new runtime.Miniflare(
 );
 await mf.ready;
 const db = await mf.getD1Database("DB");
-for (const file of ["0001.sql", "0002-login.sql", "0003-handoff.sql", "0004-terminal-intent.sql"])
+for (const file of ["0001.sql", "0002-login.sql", "0003-handoff.sql", "0004-terminal-intent.sql", "0005-live-pages.sql", "0006-cli-read-protocol.sql"])
   for (const statement of (
     await fs.readFile(path.join(root, "cloud/migrations", file), "utf8")
   )

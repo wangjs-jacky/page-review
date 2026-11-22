@@ -65,15 +65,24 @@
         status: "pending",
       },
     };
-    tx.objectStore("outbox").put({
-      id: note.id,
-      requestId: crypto.randomUUID(),
-      workspaceId,
-      remoteRevision: note.cloud.remoteRevision,
-      localRevision: note.revision,
-      kind,
-      note,
-    });
+    const outbox = tx.objectStore("outbox"),
+      marker = crypto.randomUUID();
+    outbox.get(note.id).onsuccess = ({ target }) => {
+      const prior = target.result;
+      outbox.put({
+        id: note.id,
+        requestId: marker,
+        syncMarkers: [
+          ...(prior?.workspaceId === workspaceId ? prior.syncMarkers || [prior.requestId] : []),
+          marker,
+        ],
+        workspaceId,
+        remoteRevision: note.cloud.remoteRevision,
+        localRevision: note.revision,
+        kind,
+        note,
+      });
+    };
     return note;
   }
   async function refreshVersion(workspaceId) {
@@ -204,6 +213,9 @@
         outbox.put({
           ...current,
           remoteRevision: remote.revision,
+          syncMarkers: (current.syncMarkers || [current.requestId]).filter(
+            (marker) => !(entry.syncMarkers || [entry.requestId]).includes(marker),
+          ),
           requestId: crypto.randomUUID(),
         });
     };

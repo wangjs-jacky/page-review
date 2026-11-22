@@ -292,6 +292,8 @@
           const payload = {
             requestId: entry.requestId,
             expectedRevision: entry.remoteRevision,
+            syncMarkers: entry.syncMarkers || [entry.requestId],
+            ...(entry.kind === "delete" ? { pageUrl: entry.note.pageId } : {}),
             ...(entry.kind === "delete" ? {} : { note: entry.note, assets }),
           };
           const response = await request(c, "/v1/annotations/" + entry.id, {
@@ -515,6 +517,57 @@
       }
       return runBatch({ page, strict: true });
     }
+    async function pageReference(page) {
+      if (!(await status()).configured)
+        throw failure("请先连接云空间", "login_required");
+      const c = await config();
+      if (!c?.workspaceId)
+        throw failure("请先连接云空间", "login_required");
+      // Copy is a user action: check the complete delivery contract once, without
+      // waiting for uploads or querying their progress. An offline local hash
+      // alone cannot establish that the service or terminal can read it.
+      const ready = await setup(), current = await config();
+      if (current?.token !== c.token || current?.workspaceId !== c.workspaceId)
+        throw failure("账号已变化，请重新复制", "account_mismatch");
+      if (!(await status()).configured)
+        throw failure("请重新登录账号", "login_required");
+      if (ready.setupError)
+        throw failure(ready.setupError, "cloud_unavailable");
+      if (ready.capabilities?.livePageReferences !== 1 || !ready.capabilities?.cliAvailable)
+        throw failure("当前连接尚不支持网页引用，请更新 Page Review 服务后重试", "service_update_required");
+      if (!ready.cliConnections.length)
+        throw failure("请先连接执行读取的终端", "cli_not_connected");
+      if (!ready.cliConnections.some(connection => connection.read_protocol >= 1))
+        throw failure("请更新终端 Page Review 工具并运行 page-review status 后重试", "cli_update_required");
+      let [notes, pending] = await Promise.all([db.list(page), db.pending()]);
+      if (!notes.length && !pending.some(entry => entry.note.pageId === page)) {
+        // An explicit empty-page copy registers its URL once, and also loads any
+        // existing remote history. Never manufacture an unresolvable empty ID.
+        await refreshPage(page);
+        [notes, pending] = await Promise.all([db.list(page), db.pending()]);
+      }
+      const changes = pending.filter((entry) => entry.note.pageId === page);
+      if (notes.some((note) => note.cloud?.workspaceId && note.cloud.workspaceId !== c.workspaceId) ||
+          changes.some((entry) => entry.workspaceId !== c.workspaceId))
+        throw failure("请登录保存这些评注的账号", "account_mismatch");
+      if (notes.some((note) => !note.cloud?.workspaceId))
+        throw failure("本页有尚未加入云空间的评注，请先同步", "page_changed");
+      const digest = await hash(new TextEncoder().encode(JSON.stringify([
+        "page-review-live-v1", c.workspaceId, page,
+      ])));
+      const id = "live-" + digest,
+        markers = changes.map((entry) => (entry.syncMarkers || [entry.requestId]).at(-1)),
+        after = markers.join(","),
+        reference = "page-review-" + id;
+      if ((await config())?.token !== c.token)
+        throw failure("账号已变化，请重新复制", "account_mismatch");
+      return {
+        pending: Boolean(after),
+        reference: reference + (after ? "\n同步要求：--after " + after : ""),
+        text: "请读取这个网页最新的完整评注和附件：\npage-review read " +
+          reference + (after ? " --after " + after : "") + " --api " + c.apiUrl,
+      };
+    }
     function handoff(page) {
       return queued(() => prepareHandoff(page));
     }
@@ -580,6 +633,7 @@
       asset,
       setup,
       handoff,
+      pageReference,
       status,
       workspace,
       connect,

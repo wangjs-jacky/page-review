@@ -277,13 +277,13 @@
         `<div class="settings-body"><p class="inline-error" role="alert">${esc(error.message)}</p><button class="btn" data-action="check">重试</button></div>`;
     }
   }
-  async function copy(text) {
+  async function copy(text, pending = false) {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
       await send("COPY_TEXT", { text });
     }
-    toast("已复制");
+    toast(pending ? "已复制，最新评注正在同步" : "已复制");
   }
   async function act(b) {
     const a = b.dataset.action,
@@ -406,8 +406,8 @@
       return video.play();
     }
     if (a === "copy-page" || a === "copy-page-full") {
-      const fixed = await send("CREATE_HANDOFF", { pageUrl: b.dataset.page || n.url });
-      await copy(a === "copy-page-full" ? fixed.text : fixed.reference);
+      const fixed = await send("GET_PAGE_REFERENCE", { pageUrl: b.dataset.page || n.url });
+      await copy(a === "copy-page-full" ? fixed.text : fixed.reference, fixed.pending);
       return;
     }
     if (a === "conflict") {

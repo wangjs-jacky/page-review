@@ -3,8 +3,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { buildLightCli } from "./build-cli-light.mjs";
-import { VERSION } from "../cli/page-review.mjs";
+import { buildLightCli, writeCliManifest } from "./build-cli-light.mjs";
+import { CLI_VERSION as VERSION } from "../cloud/cli-release.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   bun =
     process.env.PAGE_REVIEW_BUN ||
@@ -12,9 +12,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
 const dir = path.join(root, "dist/cli/releases", VERSION);
 await fs.mkdir(dir, { recursive: true });
 await fs.mkdir(path.join(root, ".local"), { recursive: true });
-const light = await buildLightCli();
-const sums = [],
-  files = [light.name, "SHA256SUMS.node"];
+await buildLightCli();
+const sums = [];
 for (const arch of ["arm64", "x64"]) {
   const staging = await fs.mkdtemp(path.join(root, ".local/cli-build-"));
   try {
@@ -45,17 +44,12 @@ for (const arch of ["arm64", "x64"]) {
         "  " +
         name,
     );
-    files.push(name);
   } finally {
     await fs.rm(staging, { recursive: true, force: true });
   }
 }
 await fs.writeFile(path.join(dir, "SHA256SUMS"), sums.join("\n") + "\n");
-files.push("SHA256SUMS");
-await fs.writeFile(
-  path.join(dir, "manifest.json"),
-  JSON.stringify({ version: VERSION, files }) + "\n",
-);
+await writeCliManifest();
 await fs.copyFile(
   path.join(root, "dist/cli/install.sh"),
   path.join(dir, "install.sh"),

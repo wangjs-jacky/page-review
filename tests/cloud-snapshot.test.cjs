@@ -270,3 +270,20 @@ test("editing an imported annotation retains its remote-only attachment referenc
   assert.equal(entry.note.comment, "修改后的正文");
   assert.equal(JSON.stringify(entry.note.cloud.assets), JSON.stringify([asset]));
 });
+
+test("连续编辑合并待同步数据时保留已复制的同步标记，首笔确认后只留下未完成标记", async () => {
+  const { db } = client();
+  await db.save(note("annotation-1"), null, workspace);
+  const [first] = await db.pending(workspace);
+  await db.patch(first.id, () => note(first.id, 2), workspace);
+  const [second] = await db.pending(workspace);
+  assert.deepEqual(Array.from(second.syncMarkers), [first.requestId, second.requestId]);
+  await db.acknowledge(first, { revision: 1 });
+  const [remaining] = await db.pending(workspace);
+  assert.deepEqual(Array.from(remaining.syncMarkers), [second.requestId]);
+  assert.equal(remaining.remoteRevision, 1);
+  await db.remove(first.id, workspace);
+  const [deletion] = await db.pending(workspace);
+  assert.equal(deletion.kind, "delete");
+  assert.deepEqual(Array.from(deletion.syncMarkers), [second.requestId, deletion.requestId]);
+});
