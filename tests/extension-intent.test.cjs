@@ -31,7 +31,12 @@ test('插件主动登录未登录时去身份页，已登录自动接续无确�
    assert.equal(id,'a'.repeat(32));assert.equal(message.requestId,t.requestId);
    if(message.type==='PAGE_REVIEW_LOGIN_PROOF')return {proof:t.proof};
    const callback=new URL(message.callbackUrl);assert.equal(callback.searchParams.get('state'),t.state);code=callback.searchParams.get('code');
-   const response=await t.request('/auth/exchange',{method:'POST',data:{code,verifier:t.verifier}});assert.equal(response.status,200);token=(await response.json()).token;return {ok:true};
+   const response=await t.request('/auth/exchange',{method:'POST',data:{code,verifier:t.verifier}});
+   assert.equal(response.status,200);
+   const signed=await response.json();
+   assert.equal(signed.expiresAt,null);
+   token=signed.token;
+   return {ok:true};
  }}},fetch:async(url,options)=>{assert.equal(url,'/page-review/authorize');const res=await t.route(t.requestId,'POST',options.body);return new Response(JSON.stringify(res.body),{status:res.code});}});
  await vm.runInContext(page.body.match(/<script>([\s\S]*)<\/script>/)[1],ctx);
  assert(token);assert(closed);assert.equal(t.approvals(),1);

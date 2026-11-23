@@ -50,7 +50,7 @@ sequenceDiagram
 - `SameSite=Lax` 跨站表单返回不会携带中央 Cookie，因此不能在首次跨站 POST 上假定用户已登录。接续文档使下一次请求成为同源请求；没有放宽 Cookie 或共享域。
 - 接力表单的 Referrer-Policy 为 `origin`，使浏览器提供可校验的 Origin，同时不发送请求 ID 所在路径。`no-referrer` 会让表单 Origin 成为 null；不得为兼容而接受 null。
 - 插件复制的命令带期待 workspace；服务端从签名身份推导 workspace 比对。手工运行不带期待账号时，以当前中央身份为准。跨浏览器/Profile 仍须登录该浏览器，不能读取另一 Profile 的 Cookie。
-- 证明摘要、PKCE、state、短时签名和一次请求分别约束浏览器在场、换码、回跳、身份接续和防重放。reader 的过期与撤销继续由每次 API 请求检查；writer 不能被导入为 CLI reader。
+- 证明摘要、PKCE、state、短时签名和一次请求分别约束浏览器在场、换码、回跳、身份接续和防重放。新 reader 独立于中央登录会话，由每次 API 请求检查是否撤销。旧限时 reader 的过期时间仍继续检查，writer 不能被导入为 CLI reader。
 - CLI 超时是单次截止时间，关闭本机监听；没有状态轮询、退避查询或定时任务。已有 DOM 防抖、提示消失及录制时长上限属于事件/截止时间，不查询业务状态。
 
 ## 部署前提与回滚边界

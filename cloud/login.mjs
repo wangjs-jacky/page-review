@@ -297,12 +297,9 @@ export async function loginRoute(request, env) {
         .join("");
     const kind = row.client_kind === "reader" ? "reader" : "writer",
       tokenId = crypto.randomUUID();
-    const expiresAt = new Date(
-      Math.min(
-        Date.parse(row.session_expires_at),
-        Date.now() + (kind === "reader" ? 30 * 24 : 6) * 3600_000,
-      ),
-    ).toISOString();
+    // The identity session must be valid at exchange. Each issued connection
+    // remains valid until explicitly revoked.
+    const expiresAt = null;
     await db.batch([
       db
         .prepare("INSERT OR IGNORE INTO workspaces(id,created_at) VALUES(?,?)")

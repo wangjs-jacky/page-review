@@ -113,7 +113,7 @@ async function context() {
     setIdentity: (value) => (identity = value),
   };
 }
-test("新终端自动复用浏览器会话：仅终端在场证明可取reader，PKCE和一次使用保留", async () => {
+test("新终端通过终端在场证明和一次性PKCE签发可撤销的永久只读授权", async (testContext) => {
   const c = await context();
   assert(!c.page.body.includes("授权只读访问"));
   assert.match(c.page.body, /http:\/\/127.0.0.1:45291\/connect/);
@@ -150,7 +150,18 @@ test("新终端自动复用浏览器会话：仅终端在场证明可取reader�
   assert.equal((await exchange(random())).status, 401);
   const signed = await (await exchange(c.verifier)).json();
   assert.equal(signed.access, "reader");
+  assert.equal(signed.expiresAt, null);
+  const { expires_at } = c.t.sql
+    .prepare("SELECT expires_at FROM tokens WHERE id=?")
+    .get(signed.connectionId);
+  assert.equal(expires_at, null);
   assert.equal((await exchange(c.verifier)).status, 401);
+  testContext.mock.timers.enable({ apis: ["Date"] });
+  testContext.mock.timers.setTime(Date.now() + 31 * 24 * 3600_000);
+  assert.equal(
+    (await c.t.request("/v1/annotations", { token: signed.token })).status,
+    200,
+  );
   assert.equal(
     (
       await c.t.request("/v1/annotations/forbidden-write", {
@@ -160,6 +171,15 @@ test("新终端自动复用浏览器会话：仅终端在场证明可取reader�
       })
     ).status,
     403,
+  );
+  assert.equal(
+    (await c.t.request("/v1/session", { method: "DELETE", token: signed.token }))
+      .status,
+    200,
+  );
+  assert.equal(
+    (await c.t.request("/v1/annotations", { token: signed.token })).status,
+    401,
   );
 });
 test("陌生授权URL、外站POST、伪造证明、账号变化、过期和取消都不能签发终端凭据", async () => {
