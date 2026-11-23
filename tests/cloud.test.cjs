@@ -30,12 +30,27 @@ test('workspace隔离同时覆盖元数据、原上下文和图片，即使知�
   for (const path of ['/v1/annotations/annotation-1', '/v1/annotations/annotation-1/context', '/v1/assets/' + image.id]) assert.equal((await t.request(path, { token: t.other })).status, 404);
   assert.equal((await (await t.request('/v1/annotations', { token: t.other })).json()).items.length, 0);
 });
-test('撤销后元数据与图片真实拒绝，原连接历史保留但不含明文凭证', async () => {
-  const t = await setup(), image = await t.upload(); await t.save('annotation-1', { hasImage: true }, 0, crypto.randomUUID(), [image]); const r = await t.reader();
-  assert.equal((await t.request('/v1/assets/' + image.id, { token: r.token })).status, 200);
-  await t.request('/v1/connections/' + r.id, { method: 'DELETE' });
-  for (const path of ['/v1/annotations', '/v1/annotations/annotation-1/context', '/v1/assets/' + image.id]) assert.equal((await t.request(path, { token: r.token })).status, 401);
-  const list = await (await t.request('/v1/connections')).text(); assert(!list.includes(r.token)); assert(list.includes('revoked_at'));
+test('独立 Agent 授权无到期时间，撤销后评注与图片立即拒绝访问', async (testContext) => {
+  const t = await setup();
+  const image = await t.upload();
+  assert.equal((await t.save('annotation-1', { hasImage: true }, 0, crypto.randomUUID(), [image])).status, 200);
+  const reader = await t.reader();
+  const grant = t.sql.prepare('SELECT expires_at FROM tokens WHERE id=?').get(reader.id);
+  assert.equal(grant.expires_at, null);
+
+  testContext.mock.timers.enable({ apis: ['Date'], now: Date.now() + 31 * 24 * 3600_000 });
+  const paths = ['/v1/annotations', '/v1/annotations/annotation-1/context', '/v1/assets/' + image.id];
+  for (const path of paths)
+    assert.equal((await t.request(path, { token: reader.token })).status, 200);
+
+  const revoke = await t.request('/v1/connections/' + reader.id, { method: 'DELETE' });
+  assert.equal(revoke.status, 200);
+  for (const path of paths)
+    assert.equal((await t.request(path, { token: reader.token })).status, 401);
+
+  const list = await (await t.request('/v1/connections')).text();
+  assert(!list.includes(reader.token));
+  assert(list.includes('revoked_at'));
 });
 test('删除立即隐藏上下文与图片，旧上传不能复活；未同步新记录也可留墓碑', async () => {
   const t = await setup(), image = await t.upload(); await t.save('annotation-1', { hasImage: true }, 0, crypto.randomUUID(), [image]);

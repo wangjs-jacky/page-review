@@ -145,44 +145,79 @@ test("拒绝伪造身份、错误issuer/audience、过期证明和任意回跳�
   );
   assert.equal(t.sql.prepare("SELECT COUNT(*) n FROM users").get().n, 0);
 });
-test("插件退出和会话到期都撤销写权限，独立只读授权保持直到明确撤销", async () => {
+test("浏览器授权在中央会话到期后仍可写入，退出后撤销且保留独立只读授权", async (testContext) => {
   const t = await fixture(),
-    a = await login(t);
+    { signed } = await login(t);
   const reader = await (
     await t.request("/v1/connections", {
-      token: a.signed.token,
+      token: signed.token,
       method: "POST",
       data: { name: "我的AI" },
     })
   ).json();
+  testContext.mock.timers.enable({ apis: ["Date"], now: Date.now() + 31 * 24 * 3600_000 });
+  const path = "/v1/annotations/permanent-writer-note";
+  const save = (token, expectedRevision) =>
+    t.request(path, {
+      token,
+      method: "PUT",
+      data: { note: t.note, assets: [], requestId: crypto.randomUUID(), expectedRevision },
+    });
+  assert.equal((await save(signed.token, 0)).status, 200);
+  assert.equal(signed.expiresAt, null);
+  assert.equal(
+    t.sql.prepare("SELECT expires_at FROM tokens WHERE id=?")
+      .get(signed.connectionId).expires_at,
+    null,
+  );
   assert.equal(
     (
       await t.request("/v1/session", {
         method: "DELETE",
-        token: a.signed.token,
+        token: signed.token,
       })
     ).status,
     200,
   );
+  assert.equal((await t.request("/v1/me", { token: signed.token })).status, 401);
+  assert.equal((await save(signed.token, 1)).status, 401);
+  const read = await t.request(path + "/context", { token: reader.token });
+  assert.equal(read.status, 200);
+  assert.equal((await read.json()).comment, t.note.comment);
+});
+test("已有的限时浏览器授权仍按原时点失效", async (testContext) => {
+  const t = await fixture(), { signed } = await login(t);
+  testContext.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const expiresAt = Date.now() + 1000;
+  t.sql.prepare("UPDATE tokens SET expires_at=? WHERE id=?")
+    .run(new Date(expiresAt).toISOString(), signed.connectionId);
+  const me = () => t.request("/v1/me", { token: signed.token });
+  assert.equal((await me()).status, 200);
+  testContext.mock.timers.setTime(expiresAt);
+  assert.equal((await me()).status, 401);
+});
+test("浏览器登录码换取授权时仍须持有未过期的中央会话", async (testContext) => {
+  const t = await fixture();
+  testContext.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await start(t);
+  const sessionExpiresAt = Date.now() + 1000;
+  const approved = await s.approve({
+    ...s.identity,
+    sessionExpiresAt: new Date(sessionExpiresAt).toISOString(),
+  });
+  assert.equal(approved.status, 200);
+  const code = new URL((await approved.json()).callbackUrl).searchParams.get("code");
+  testContext.mock.timers.setTime(sessionExpiresAt);
   assert.equal(
-    (await t.request("/v1/me", { token: a.signed.token })).status,
+    (
+      await t.request("/auth/exchange", {
+        method: "POST",
+        data: { code, verifier: s.verifier },
+      })
+    ).status,
     401,
   );
-  assert.equal(
-    (await t.request("/v1/annotations", { token: reader.token })).status,
-    200,
-  );
-  const b = await login(t);
-  t.sql
-    .prepare("UPDATE tokens SET expires_at=? WHERE token_hash=?")
-    .run(
-      "2000-01-01T00:00:00.000Z",
-      crypto.createHash("sha256").update(b.signed.token).digest("hex"),
-    );
-  assert.equal(
-    (await t.request("/v1/me", { token: b.signed.token })).status,
-    401,
-  );
+  assert.equal(t.sql.prepare("SELECT COUNT(*) n FROM users").get().n, 0);
 });
 test("中央接入只接受本人会话及同源确认，证明由服务端签发，不接收客户端user ID", async () => {
   const { createPageReviewBridge } = await import(
